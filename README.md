@@ -1,6 +1,13 @@
+<<<<<<< HEAD
 # Sprint Game Manager (SGM)
 
 Desktop GUI for managing Intellivision Sprint Console ROMs and assets in a single folder, per `instructions.md`.
+
+## Setup
+
+# SprintGameManager
+
+Desktop GUI for managing Intellivision Sprint Console ROMs and assets for sideloading on the console, per `instructions.md`.
 
 ## Setup
 
