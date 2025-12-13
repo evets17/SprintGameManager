@@ -1,0 +1,38 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.DS_Store
+.idea/
+.vscode/
+sgm.ini
+_dev_instruct/
+_derive_smoke*/
+_meta_smoke*/
+_resize_smoke*/
+_paste_test.png
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Python packaging/build
+dist/
+build/
+*.egg-info/
+*.spec
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Temp/backup files
+*.tmp
+*.bak
+*.swp
