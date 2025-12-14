@@ -117,6 +117,18 @@ class FileCard(QWidget):
 
 
 class ThinFileRow(QWidget):
+    MAX_LABEL_CHARS = 80
+
+    @staticmethod
+    def _elide_left(text: str, *, max_chars: int) -> str:
+        if max_chars <= 0:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        if max_chars <= 3:
+            return "." * max_chars
+        return "..." + text[-(max_chars - 3) :]
+
     def __init__(self, *, title: str, allowed_exts: set[str], on_add_file):
         super().__init__()
         self._title = title
@@ -162,7 +174,10 @@ class ThinFileRow(QWidget):
     def set_context(self, *, folder: Path | None, basename: str | None, existing: Path | None, warning: str | None) -> None:
         self._folder = folder
         self._basename = basename
-        self._path.setText(str(existing) if existing else "(missing)")
+        full = str(existing) if existing else "(missing)"
+        shown = self._elide_left(full, max_chars=self.MAX_LABEL_CHARS)
+        self._path.setText(shown)
+        self._path.setToolTip(full if existing else "")
         w = (warning or "").strip()
         self._warning.setText(w)
         self._warning.setVisible(bool(w))
@@ -561,6 +576,57 @@ class OverlayBuildDialog(QDialog):
     def _choose_big(self) -> None:
         self.choice = "big"
         self.accept()
+
+
+class QrUrlDialog(QDialog):
+    def __init__(self, *, parent: QWidget):
+        super().__init__(parent)
+        self.setWindowTitle("QR Code")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        layout.addWidget(QLabel("Enter URL:"))
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+
+        self._edit = QLineEdit()
+        self._edit.setPlaceholderText("https://...")
+        row.addWidget(self._edit, 1)
+
+        btn_paste = QPushButton("Paste")
+        btn_paste.setMaximumHeight(24)
+        btn_paste.setToolTip("Paste the current clipboard text into the URL field")
+        btn_paste.clicked.connect(self._paste)
+        row.addWidget(btn_paste)
+
+        layout.addLayout(row)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.addStretch(1)
+        btn_ok = QPushButton("OK")
+        btn_cancel = QPushButton("Cancel")
+        btn_ok.setDefault(True)
+        btn_ok.clicked.connect(self.accept)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_ok)
+        btn_row.addWidget(btn_cancel)
+        layout.addLayout(btn_row)
+
+        # Roughly 150% of the default QInputDialog width.
+        self.setMinimumWidth(600)
+        self.resize(600, self.sizeHint().height())
+
+    def value(self) -> str:
+        return self._edit.text()
+
+    def _paste(self) -> None:
+        self._edit.setText(QApplication.clipboard().text() or "")
+        self._edit.setFocus()
+        self._edit.selectAll()
 
 
 class ConfigLookupDialog(QDialog):
@@ -983,6 +1049,9 @@ class MainWindow(QMainWindow):
             ("resolution:box_small", "Wrong Box Small resolution"),
             ("resolution:overlay_big", "Wrong Overlay Big resolution"),
             ("resolution:overlay", "Wrong Overlay resolution"),
+            ("resolution:overlay1", "Wrong Overlay 1 resolution"),
+            ("resolution:overlay2", "Wrong Overlay 2 resolution"),
+            ("resolution:overlay3", "Wrong Overlay 3 resolution"),
             ("resolution:qrcode", "Wrong QR Code resolution"),
             ("resolution:snap1", "Wrong Snap 1 resolution"),
             ("resolution:snap2", "Wrong Snap 2 resolution"),
@@ -1156,6 +1225,16 @@ class MainWindow(QMainWindow):
             if size != (expected.width, expected.height):
                 codes.add(f"resolution:{kind}")
 
+        def add_resolution_only(kind: str, p: Path | None, expected) -> None:
+            if p is None:
+                return
+            size = get_image_size(p)
+            if size is None:
+                codes.add(f"resolution:{kind}")
+                return
+            if size != (expected.width, expected.height):
+                codes.add(f"resolution:{kind}")
+
         add_image("box", game.box, self._config.box_resolution)
         add_image("box_small", game.box_small, self._config.box_small_resolution)
         add_image("overlay_big", game.overlay_big, self._config.overlay_big_resolution)
@@ -1163,6 +1242,12 @@ class MainWindow(QMainWindow):
             codes.add("conflict:overlay")
         primary_overlay = game.overlay if game.overlay is not None else game.overlay1
         add_image("overlay", primary_overlay, self._config.overlay_resolution)
+
+        # Multi-overlay support: only warn on resolution if the files exist.
+        add_resolution_only("overlay1", game.overlay1, self._config.overlay_resolution)
+        add_resolution_only("overlay2", game.overlay2, self._config.overlay_resolution)
+        add_resolution_only("overlay3", game.overlay3, self._config.overlay_resolution)
+
         add_image("qrcode", game.qrcode, self._config.qrcode_resolution)
 
         desired = self._config.desired_number_of_snaps
@@ -1937,10 +2022,12 @@ class MainWindow(QMainWindow):
         game = self._current_game()
         if not game:
             return
-        url, ok = QInputDialog.getText(self, "QR Code", "Enter URL:")
-        if not ok:
+
+        dlg = QrUrlDialog(parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        url = url.strip()
+
+        url = dlg.value().strip()
         if not url:
             return
         dest = game.folder / f"{game.basename}_qrcode.png"
