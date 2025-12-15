@@ -89,8 +89,6 @@ def _build_name(new_basename: str, old_path: Path, kind: str) -> str:
         return new_basename + "_small.png"
     if kind == "overlay":
         return new_basename + "_overlay.png"
-    if kind == "overlay1":
-        return new_basename + "_overlay1.png"
     if kind == "overlay2":
         return new_basename + "_overlay2.png"
     if kind == "overlay3":

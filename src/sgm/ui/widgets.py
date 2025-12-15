@@ -516,23 +516,7 @@ class OverlayPrimaryCard(OverlayCard):
         if not self._folder or not self._basename:
             return None
 
-        overlay = self._folder / f"{self._basename}_overlay.png"
-        overlay1 = self._folder / f"{self._basename}_overlay1.png"
-        overlay2 = self._folder / f"{self._basename}_overlay2.png"
-        overlay3 = self._folder / f"{self._basename}_overlay3.png"
-
-        # Conflict case: keep using _overlay.png.
-        if overlay.exists() and overlay1.exists():
-            return overlay
-
-        multi = overlay2.exists() or overlay3.exists()
-        if multi:
-            return overlay1
-
-        if overlay1.exists() and not overlay.exists():
-            return overlay1
-
-        return overlay
+        return self._folder / f"{self._basename}_overlay.png"
 
 
 class SnapshotCard(ImageCard):

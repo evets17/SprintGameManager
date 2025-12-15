@@ -14,7 +14,7 @@ Desktop GUI for managing Intellivision Sprint Console games (ROM, config, metada
 
 ### Analyze the games folder
 - Use the **Analyze** area to scan the currently selected games folder and compute warnings per game.
-- Use the warning filters to show only specific issues (missing ROM/config/metadata/images, overlay conflicts, resolution mismatches, etc.).
+- Use the warning filters to show only specific issues (missing ROM/config/metadata/images, resolution mismatches, etc.).
 - Enable **Only games with warnings** to quickly narrow the game list.
 - Use the **select all / clear all** filter buttons to toggle filters faster.
 - If you add/rename files, re-run Analyze (or Refresh) to update results.
@@ -38,7 +38,6 @@ Each image card supports:
 - **Blank**: sets the slot to the packaged empty overlay image.
 - **Keep Ratio** (overlay cards only): when checked, Browse/Paste keeps the source aspect ratio and centers it on a transparent canvas (no stretching).
 - **Reorder overlays**: if at least two overlay files exist, drag one overlay card onto another to swap/move their underlying files.
-	- If both `_overlay.png` and `_overlay1.png` exist (conflict), reorder is blocked until resolved.
 
 ### 7) Snapshots (1–3)
 - If you have multiple snap images, drag one snap card onto another to swap/move `_snap1/_snap2/_snap3`.

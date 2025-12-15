@@ -19,7 +19,6 @@ class GameAssets:
     box: Path | None = None
     box_small: Path | None = None
     overlay: Path | None = None
-    overlay1: Path | None = None
     overlay2: Path | None = None
     overlay3: Path | None = None
     overlay_big: Path | None = None
@@ -40,7 +39,6 @@ class GameAssets:
             self.box,
             self.box_small,
             self.overlay,
-            self.overlay1,
             self.overlay2,
             self.overlay3,
             self.overlay_big,

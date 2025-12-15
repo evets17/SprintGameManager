@@ -1041,7 +1041,6 @@ class MainWindow(QMainWindow):
             ("missing:box_small", "Missing Box Small"),
             ("missing:overlay_big", "Missing Overlay Big"),
             ("missing:overlay", "Missing Overlay"),
-            ("conflict:overlay", "Overlay conflict (overlay + overlay1)"),
             ("missing:qrcode", "Missing QR Code"),
             ("missing:snap1", "Missing Snap 1"),
             ("missing:snap2", "Missing Snap 2"),
@@ -1050,7 +1049,6 @@ class MainWindow(QMainWindow):
             ("resolution:box_small", "Wrong Box Small resolution"),
             ("resolution:overlay_big", "Wrong Overlay Big resolution"),
             ("resolution:overlay", "Wrong Overlay resolution"),
-            ("resolution:overlay1", "Wrong Overlay 1 resolution"),
             ("resolution:overlay2", "Wrong Overlay 2 resolution"),
             ("resolution:overlay3", "Wrong Overlay 3 resolution"),
             ("resolution:qrcode", "Wrong QR Code resolution"),
@@ -1239,13 +1237,9 @@ class MainWindow(QMainWindow):
         add_image("box", game.box, self._config.box_resolution)
         add_image("box_small", game.box_small, self._config.box_small_resolution)
         add_image("overlay_big", game.overlay_big, self._config.overlay_big_resolution)
-        if game.overlay is not None and game.overlay1 is not None:
-            codes.add("conflict:overlay")
-        primary_overlay = game.overlay if game.overlay is not None else game.overlay1
-        add_image("overlay", primary_overlay, self._config.overlay_resolution)
+        add_image("overlay", game.overlay, self._config.overlay_resolution)
 
         # Multi-overlay support: only warn on resolution if the files exist.
-        add_resolution_only("overlay1", game.overlay1, self._config.overlay_resolution)
         add_resolution_only("overlay2", game.overlay2, self._config.overlay_resolution)
         add_resolution_only("overlay3", game.overlay3, self._config.overlay_resolution)
 
@@ -1350,7 +1344,6 @@ class MainWindow(QMainWindow):
             config=self._config,
             spec=ImageSpec(title="Overlay 1", expected=self._config.overlay_resolution, filename="{basename}_overlay.png"),
             on_changed=self._images_changed,
-            before_write=self._before_write_overlay_primary,
             keep_ratio_enabled=True,
             keep_ratio_tooltip="When checked, added overlay images keep their aspect ratio (no stretching) by fitting inside the target resolution and centering on a transparent canvas.",
         )
@@ -1371,7 +1364,6 @@ class MainWindow(QMainWindow):
             config=self._config,
             spec=ImageSpec(title="Overlay 2", expected=self._config.overlay_resolution, filename="{basename}_overlay2.png"),
             on_changed=self._images_changed,
-            before_write=self._before_write_overlay_multi,
             keep_ratio_enabled=True,
             keep_ratio_tooltip="When checked, added overlay images keep their aspect ratio (no stretching) by fitting inside the target resolution and centering on a transparent canvas.",
         )
@@ -1392,7 +1384,6 @@ class MainWindow(QMainWindow):
             config=self._config,
             spec=ImageSpec(title="Overlay 3", expected=self._config.overlay_resolution, filename="{basename}_overlay3.png"),
             on_changed=self._images_changed,
-            before_write=self._before_write_overlay_multi,
             keep_ratio_enabled=True,
             keep_ratio_tooltip="When checked, added overlay images keep their aspect ratio (no stretching) by fitting inside the target resolution and centering on a transparent canvas.",
         )
@@ -1646,14 +1637,8 @@ class MainWindow(QMainWindow):
         ob_w, ob_resize = resolution_status(game.overlay_big, self._config.overlay_big_resolution)
         self._img_overlay_big.set_context(folder=folder, basename=basename, existing_path=game.overlay_big, warnings=ob_w, needs_resize=ob_resize)
 
-        primary_overlay = game.overlay if game.overlay is not None else game.overlay1
-        ov_w, ov_resize = resolution_status(primary_overlay, self._config.overlay_resolution)
-        if game.overlay is not None and game.overlay1 is not None:
-            ov_w = [
-                "Warning: both _overlay.png and _overlay1.png exist; using _overlay.png",
-                *ov_w,
-            ]
-        self._img_overlay1.set_context(folder=folder, basename=basename, existing_path=primary_overlay, warnings=ov_w, needs_resize=ov_resize)
+        ov_w, ov_resize = resolution_status(game.overlay, self._config.overlay_resolution)
+        self._img_overlay1.set_context(folder=folder, basename=basename, existing_path=game.overlay, warnings=ov_w, needs_resize=ov_resize)
 
         ov2_w, ov2_resize = resolution_status(game.overlay2, self._config.overlay_resolution) if game.overlay2 else ([], False)
         self._img_overlay2.set_context(folder=folder, basename=basename, existing_path=game.overlay2, warnings=ov2_w, needs_resize=ov2_resize)
@@ -1709,8 +1694,6 @@ class MainWindow(QMainWindow):
         if not self._folder:
             return
 
-        touched_multi_overlays: set[str] = set()
-
         for src in files:
             if src.suffix.lower() not in ACCEPTED_ADD_EXTS:
                 continue
@@ -1727,46 +1710,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Copy failed", str(e))
                 return
 
-            if dest.suffix.lower() == ".png":
-                lower = dest.stem.lower()
-                for i in (2, 3):
-                    token = f"_overlay{i}"
-                    if lower.endswith(token):
-                        touched_multi_overlays.add(dest.stem[: -len(token)])
-                        break
-
-        for base in touched_multi_overlays:
-            self._migrate_overlay_to_overlay1(self._folder, base)
-
         self.refresh()
-
-    def _migrate_overlay_to_overlay1(self, folder: Path, basename: str) -> bool:
-        overlay = folder / f"{basename}_overlay.png"
-        overlay1 = folder / f"{basename}_overlay1.png"
-
-        if not overlay.exists():
-            return True
-        if overlay1.exists():
-            return True
-
-        try:
-            overlay.rename(overlay1)
-            return True
-        except Exception as e:
-            QMessageBox.warning(self, "Overlay", f"Failed to rename {overlay.name} to {overlay1.name}: {e}")
-            return False
-
-    def _before_write_overlay_multi(self, folder: Path, basename: str, dest: Path) -> bool:
-        # Adding Overlay2/Overlay3 implies multiple overlays. If the first overlay is
-        # currently named _overlay.png, rename it to _overlay1.png.
-        return self._migrate_overlay_to_overlay1(folder, basename)
-
-    def _before_write_overlay_primary(self, folder: Path, basename: str, dest: Path) -> bool:
-        # If we're writing to _overlay1.png (because Overlay2/Overlay3 exist), migrate
-        # an existing _overlay.png to _overlay1.png first.
-        if dest.name.lower().endswith("_overlay1.png"):
-            return self._migrate_overlay_to_overlay1(folder, basename)
-        return True
 
     def _current_game(self) -> GameAssets | None:
         if not self._current:
@@ -1914,28 +1858,15 @@ class MainWindow(QMainWindow):
             return
 
         overlay = game.folder / f"{game.basename}_overlay.png"
-        overlay1 = game.folder / f"{game.basename}_overlay1.png"
         overlay2 = game.folder / f"{game.basename}_overlay2.png"
         overlay3 = game.folder / f"{game.basename}_overlay3.png"
 
-        if which in (2, 3):
-            # Creating Overlay2/Overlay3 implies multi-overlay mode.
-            self._migrate_overlay_to_overlay1(game.folder, game.basename)
-            dest = overlay2 if which == 2 else overlay3
+        if which == 1:
+            dest = overlay
+        elif which == 2:
+            dest = overlay2
         else:
-            # Destination for Overlay 1:
-            # - if both _overlay.png and _overlay1.png exist, use _overlay.png (conflict rule)
-            # - if Overlay2/Overlay3 exist, use _overlay1.png
-            # - otherwise use _overlay.png
-            if overlay.exists() and overlay1.exists():
-                dest = overlay
-            else:
-                multi = overlay2.exists() or overlay3.exists()
-                if multi:
-                    self._migrate_overlay_to_overlay1(game.folder, game.basename)
-                    dest = overlay1
-                else:
-                    dest = overlay
+            dest = overlay3
         if dest.exists():
             resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
             if resp != QMessageBox.StandardButton.Yes:
@@ -2090,40 +2021,17 @@ class MainWindow(QMainWindow):
         base = game.basename
 
         overlay = folder / f"{base}_overlay.png"
-        overlay1 = folder / f"{base}_overlay1.png"
         overlay2 = folder / f"{base}_overlay2.png"
         overlay3 = folder / f"{base}_overlay3.png"
 
         # Only enable meaningful reorders when at least two overlay slots exist on disk.
-        existing = [p for p in (overlay, overlay1, overlay2, overlay3) if p.exists()]
+        existing = [p for p in (overlay, overlay2, overlay3) if p.exists()]
         if len(existing) < 2:
             return
 
-        # Conflict case: ambiguous primary overlay; block reorder until user resolves.
-        if overlay.exists() and overlay1.exists():
-            QMessageBox.warning(
-                self,
-                "Reorder failed",
-                "Both _overlay.png and _overlay1.png exist. Resolve this conflict before reordering overlays.",
-            )
-            return
-
-        multi = overlay2.exists() or overlay3.exists()
-
-        # In multi-overlay mode, slot 1 should be _overlay1.png. If legacy _overlay.png exists,
-        # migrate it so slot 1 reorders are consistent.
-        if multi and overlay.exists() and (not overlay1.exists()):
-            try:
-                overlay.rename(overlay1)
-            except Exception as e:
-                QMessageBox.warning(self, "Reorder failed", f"Failed to rename {overlay.name} to {overlay1.name}: {e}")
-                return
-
         def p(i: int) -> Path:
             if i == 1:
-                if multi:
-                    return overlay1
-                return overlay if overlay.exists() else overlay1
+                return overlay
             if i == 2:
                 return overlay2
             return overlay3
