@@ -37,6 +37,46 @@ def plan_rename_for_game_files(folder: Path, old_basename: str, new_basename: st
     return moves
 
 
+def plan_rename_for_folder_support_files(parent_folder: Path, old_basename: str, new_basename: str) -> list[tuple[Path, Path]]:
+    """Rename folder-supporting files that live alongside the folder.
+
+    Folder-support files follow the same naming as games (png/json variants),
+    but ROM (.int/.bin/.rom) and config (.cfg) do not apply.
+    """
+    moves: list[tuple[Path, Path]] = []
+
+    for entry in parent_folder.iterdir():
+        if not entry.is_file():
+            continue
+        base, kind = _classify(entry)
+        if base != old_basename or kind is None:
+            continue
+        if kind in {"rom", "config"}:
+            continue
+
+        new_name = _build_name(new_basename, entry, kind)
+        moves.append((entry, parent_folder / new_name))
+
+    return moves
+
+
+def plan_move_game_files(src_folder: Path, dest_folder: Path, basename: str) -> list[tuple[Path, Path]]:
+    moves: list[tuple[Path, Path]] = []
+
+    if not src_folder.exists() or not src_folder.is_dir():
+        return moves
+
+    for entry in src_folder.iterdir():
+        if not entry.is_file():
+            continue
+        base, kind = _classify(entry)
+        if base != basename or kind is None:
+            continue
+        moves.append((entry, dest_folder / entry.name))
+
+    return moves
+
+
 def rename_many(moves: list[tuple[Path, Path]]) -> None:
     if not moves:
         return

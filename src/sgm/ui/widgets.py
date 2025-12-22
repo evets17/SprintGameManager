@@ -33,6 +33,7 @@ from sgm.image_ops import (
     save_png_resized_from_file,
 )
 from sgm.resources import resource_path
+from sgm.ui.dialog_state import get_start_dir, remember_path
 
 
 def _thumb_for(path: Path, *, max_w: int = 128, max_h: int = 128) -> QPixmap | None:
@@ -326,11 +327,12 @@ class ImageCard(QFrame):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select image",
-            str(self._folder),
+            get_start_dir(self._folder),
             "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*.*)",
         )
         if not path:
             return
+        remember_path(path)
         src = Path(path)
         dest = self.dest_path()
         if dest is None:
