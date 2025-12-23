@@ -187,6 +187,10 @@ def _classify(path: Path) -> tuple[str | None, str | None]:
     if suffix in ROM_EXTS:
         return stem, "rom"
     if suffix == ".cfg":
+        # Some games folders include palette/config helper files that are not game configs.
+        # If the filename contains "palette" anywhere, ignore it for game discovery.
+        if "palette" in path.name.casefold():
+            return None, None
         return stem, "config"
     if suffix == ".json":
         return stem, "metadata"

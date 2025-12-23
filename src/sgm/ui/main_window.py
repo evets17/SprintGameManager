@@ -66,7 +66,7 @@ from sgm.io_utils import (
     rename_many,
     swap_files,
 )
-from sgm.scanner import scan_folder
+from sgm.scanner import _classify, scan_folder
 from sgm.ui.widgets import ImageCard, ImageSpec, OverlayCard, OverlayPrimaryCard, SnapshotCard
 from sgm.ui.dialog_state import get_start_dir, remember_path
 from sgm.version import main_window_title
@@ -94,12 +94,12 @@ def _is_hidden_dir(p: Path) -> bool:
 
 
 class GamesTreeWidget(QTreeWidget):
-    def __init__(self, *, parent: QWidget, on_move_game, on_add_files):
+    def __init__(self, *, parent: QWidget, on_move_games, on_add_files):
         super().__init__(parent)
-        self._on_move_game = on_move_game
+        self._on_move_games = on_move_games
         self._on_add_files = on_add_files
-        self._drag_game_id: str | None = None
-        self._drag_source_folder: Path | None = None
+        self._drag_game_ids: list[str] = []
+        self._drag_source_folders: set[Path] = set()
         self._root_folder: Path | None = None
 
         self._drop_hover_item: QTreeWidgetItem | None = None
@@ -113,7 +113,7 @@ class GamesTreeWidget(QTreeWidget):
         self._drop_hover_brush = QBrush(fill)
 
         self.setHeaderHidden(True)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
@@ -211,34 +211,42 @@ class GamesTreeWidget(QTreeWidget):
         super().dragLeaveEvent(event)
 
     def startDrag(self, supportedActions) -> None:
-        item = self.currentItem()
-        info = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
-        if not isinstance(info, dict) or info.get("type") != "game":
-            self._drag_game_id = None
-            self._drag_source_folder = None
-            return
-        self._drag_game_id = str(info.get("id") or "") or None
-        self._drag_source_folder = None
+        self._drag_game_ids = []
+        self._drag_source_folders = set()
 
-        # Prefer the folder recorded on the game item (works for root-level games).
-        p = info.get("folder") if isinstance(info, dict) else None
-        if p:
-            try:
-                self._drag_source_folder = Path(str(p))
-            except Exception:
-                self._drag_source_folder = None
+        # Drag all selected games (folders are ignored).
+        for item in self.selectedItems() or []:
+            info = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+            if not isinstance(info, dict) or info.get("type") != "game":
+                continue
 
-        if item is not None:
-            parent = item.parent()
+            game_id = str(info.get("id") or "").strip()
+            if not game_id:
+                continue
+            if game_id not in self._drag_game_ids:
+                self._drag_game_ids.append(game_id)
+
+            # Track source folders for no-op drops (same-folder drop).
+            src_folder: Path | None = None
+            p = info.get("folder") if isinstance(info, dict) else None
+            if p:
+                try:
+                    src_folder = Path(str(p))
+                except Exception:
+                    src_folder = None
+            parent = item.parent() if item is not None else None
             pinfo = parent.data(0, Qt.ItemDataRole.UserRole) if parent is not None else None
             if isinstance(pinfo, dict) and pinfo.get("type") == "folder":
                 p = pinfo.get("path")
                 if p:
                     try:
-                        self._drag_source_folder = Path(str(p))
+                        src_folder = Path(str(p))
                     except Exception:
-                        self._drag_source_folder = None
-        if not self._drag_game_id:
+                        src_folder = src_folder
+            if src_folder is not None:
+                self._drag_source_folders.add(src_folder)
+
+        if not self._drag_game_ids:
             return
         super().startDrag(supportedActions)
 
@@ -269,7 +277,7 @@ class GamesTreeWidget(QTreeWidget):
             event.ignore()
             return
 
-        if not self._drag_game_id:
+        if not self._drag_game_ids:
             self._clear_drop_visuals()
             event.ignore()
             return
@@ -341,11 +349,11 @@ class GamesTreeWidget(QTreeWidget):
                 event.acceptProposedAction()
                 return
 
-            game_id = self._drag_game_id
-            src_folder = self._drag_source_folder
-            self._drag_game_id = None
-            self._drag_source_folder = None
-            if not game_id:
+            game_ids = list(self._drag_game_ids)
+            src_folders = set(self._drag_source_folders)
+            self._drag_game_ids = []
+            self._drag_source_folders = set()
+            if not game_ids:
                 event.ignore()
                 return
 
@@ -373,7 +381,8 @@ class GamesTreeWidget(QTreeWidget):
             dest_folder = Path(dest)
             # Dropping onto the same folder should be a no-op. If we accept the move,
             # Qt's internal drag handling may remove the item until a refresh.
-            if src_folder is not None:
+            if len(src_folders) == 1:
+                src_folder = next(iter(src_folders))
                 try:
                     if src_folder.resolve() == dest_folder.resolve():
                         event.ignore()
@@ -385,7 +394,7 @@ class GamesTreeWidget(QTreeWidget):
 
             # Clear visuals *before* invoking handlers that may refresh/rebuild the tree.
             self._clear_drop_visuals()
-            self._on_move_game(game_id, dest_folder)
+            self._on_move_games(game_ids, dest_folder)
             event.acceptProposedAction()
         finally:
             self._clear_drop_visuals()
@@ -1392,11 +1401,19 @@ class CreateFolderDialog(QDialog):
 
 
 class MoveGameDialog(QDialog):
-    def __init__(self, *, parent: QWidget, root_folder: Path, current_folder: Path):
+    def __init__(
+        self,
+        *,
+        parent: QWidget,
+        root_folder: Path,
+        current_folder: Path,
+        title: str = "Move",
+        allow_copy: bool = True,
+    ):
         super().__init__(parent)
         self._root = root_folder
 
-        self.setWindowTitle("Move")
+        self.setWindowTitle(title)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
@@ -1413,6 +1430,7 @@ class MoveGameDialog(QDialog):
         self._chk_copy = QCheckBox("Make Copy")
         self._chk_copy.setChecked(False)
         self._chk_copy.setToolTip("If checked, copies the game files to the selected folder instead of moving them.")
+        self._chk_copy.setVisible(bool(allow_copy))
         row.addWidget(self._chk_copy)
         btn_ok = QPushButton("OK")
         btn_ok.clicked.connect(self.accept)
@@ -1580,8 +1598,8 @@ class MainWindow(QMainWindow):
         self._lbl_game_count = QLabel("Games: 0")
         list_l.addWidget(self._lbl_game_count)
 
-        self._tree = GamesTreeWidget(parent=self, on_move_game=self._move_game_to_folder, on_add_files=self._add_files_to_folder)
-        self._tree.currentItemChanged.connect(self._tree_current_changed)
+        self._tree = GamesTreeWidget(parent=self, on_move_games=self._move_games_to_folder, on_add_files=self._add_files_to_folder)
+        self._tree.itemSelectionChanged.connect(self._tree_selection_changed)
         list_l.addWidget(self._tree, 1)
 
         analyze = QFrame()
@@ -1663,14 +1681,63 @@ class MainWindow(QMainWindow):
 
         self._init_analyze_filters()
 
-    def _tree_current_changed(self, current: QTreeWidgetItem | None, previous: QTreeWidgetItem | None) -> None:
-        info = current.data(0, Qt.ItemDataRole.UserRole) if current is not None else None
+    def _tree_selection_changed(self) -> None:
+        items = list(self._tree.selectedItems() or []) if hasattr(self, "_tree") else []
+        if len(items) != 1:
+            prev = self._current
+            if prev is not None and self._meta_editor.has_unsaved_changes():
+                dlg = QMessageBox(self)
+                dlg.setIcon(QMessageBox.Icon.Warning)
+                dlg.setWindowTitle("Unsaved Changes")
+                dlg.setText("You have unsaved metadata changes.")
+                dlg.setInformativeText("Save changes before switching selection?")
+                dlg.setStandardButtons(
+                    QMessageBox.StandardButton.Save
+                    | QMessageBox.StandardButton.Discard
+                    | QMessageBox.StandardButton.Cancel
+                )
+                dlg.setDefaultButton(QMessageBox.StandardButton.Save)
+                resp = dlg.exec()
+
+                if resp == QMessageBox.StandardButton.Save:
+                    if not self._meta_editor.save_changes():
+                        # Save failed; keep current selection and preserve edits.
+                        blocker = QSignalBlocker(self._tree)
+                        try:
+                            self._tree.clearSelection()
+                            self._set_current_in_tree(prev, silent=False)
+                        finally:
+                            _ = blocker
+                        return
+                elif resp == QMessageBox.StandardButton.Discard:
+                    self._meta_editor.discard_changes()
+                else:
+                    # Cancel: keep current selection and preserve edits.
+                    blocker = QSignalBlocker(self._tree)
+                    try:
+                        self._tree.clearSelection()
+                        self._set_current_in_tree(prev, silent=False)
+                    finally:
+                        _ = blocker
+                    return
+
+            if not items:
+                self._select_none()
+            else:
+                self._select_multi(items)
+            return
+
+        item = items[0]
+        info = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
         if isinstance(info, dict) and info.get("type") == "game":
             self._select_game(str(info.get("id") or ""))
-        elif isinstance(info, dict) and info.get("type") == "folder":
+            return
+        if isinstance(info, dict) and info.get("type") == "folder":
             p = str(info.get("path") or "")
             if p:
                 self._select_folder(p)
+                return
+        self._select_none()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1868,16 +1935,131 @@ class MainWindow(QMainWindow):
         sel = self._current_selection()
         if sel is None:
             return
-        kind, game_id = sel
-        if kind != "game":
+        kind, val = sel
+        if kind == "folder":
+            folder_dir = Path(val)
+            if not folder_dir.exists() or not folder_dir.is_dir():
+                return
+
+            dlg = MoveGameDialog(
+                parent=self,
+                root_folder=self._folder,
+                current_folder=folder_dir.parent,
+                title="Move Folder",
+                allow_copy=False,
+            )
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            dest_parent = dlg.selected_folder()
+            if dest_parent is None:
+                return
+
+            try:
+                if dest_parent.resolve() == folder_dir.parent.resolve():
+                    QMessageBox.information(self, "Move Folder", "Folder is already in the selected folder.")
+                    return
+            except Exception:
+                if str(dest_parent) == str(folder_dir.parent):
+                    QMessageBox.information(self, "Move Folder", "Folder is already in the selected folder.")
+                    return
+
+            # Prevent moving a folder into itself (or into one of its descendants).
+            try:
+                src_res = folder_dir.resolve()
+                dst_res = dest_parent.resolve()
+                if dst_res == src_res or dst_res.is_relative_to(src_res):
+                    QMessageBox.warning(self, "Move Folder", "Cannot move a folder into itself (or into one of its subfolders).")
+                    return
+            except Exception:
+                # Best-effort fallback using string prefix.
+                try:
+                    src_s = str(folder_dir.resolve())
+                    dst_s = str(dest_parent.resolve())
+                    if dst_s == src_s or dst_s.startswith(src_s + os.sep):
+                        QMessageBox.warning(self, "Move Folder", "Cannot move a folder into itself (or into one of its subfolders).")
+                        return
+                except Exception:
+                    pass
+
+            # Prevent destination parent from containing a game with the same basename.
+            parent_norm = os.path.normcase(os.path.abspath(str(dest_parent)))
+            base_cmp = folder_dir.name.casefold() if os.name == "nt" else folder_dir.name
+            for game in self._games.values():
+                game_parent_norm = os.path.normcase(os.path.abspath(str(game.folder)))
+                game_base_cmp = game.basename.casefold() if os.name == "nt" else game.basename
+                if game_parent_norm == parent_norm and game_base_cmp == base_cmp:
+                    example = None
+                    try:
+                        paths = game.all_paths()
+                        example = str(paths[0]) if paths else None
+                    except Exception:
+                        example = None
+                    details = f"\n\nExample file: {example}" if example else ""
+                    QMessageBox.warning(
+                        self,
+                        "Move Folder",
+                        "Folder was not moved.\n\n"
+                        f"A game named '{folder_dir.name}' already exists in:\n{dest_parent}{details}\n\n"
+                        "Choose a different destination, or rename/move the game first.",
+                    )
+                    return
+
+            dest_parent.mkdir(parents=True, exist_ok=True)
+            new_dir = dest_parent / folder_dir.name
+            if new_dir.exists():
+                QMessageBox.warning(self, "Move Folder", f"Destination already exists: {new_dir}")
+                return
+
+            # Move folder-support files that live alongside the folder.
+            moves: list[tuple[Path, Path]] = []
+            src_parent = folder_dir.parent
+            try:
+                for entry in src_parent.iterdir():
+                    if not entry.is_file():
+                        continue
+                    base, kind2 = _classify(entry)
+                    if base != folder_dir.name or kind2 is None:
+                        continue
+                    if kind2 in {"rom", "config"}:
+                        continue
+                    moves.append((entry, dest_parent / entry.name))
+            except Exception:
+                pass
+
+            # Move the folder directory itself.
+            moves.append((folder_dir, new_dir))
+
+            try:
+                rename_many(moves)
+            except RenameCollisionError as e:
+                QMessageBox.warning(self, "Move Folder blocked", str(e))
+                return
+            except Exception as e:
+                QMessageBox.warning(self, "Move Folder failed", str(e))
+                return
+
+            self._force_expand_folder_paths = {str(dest_parent), str(new_dir)}
+
+            def do_refresh() -> None:
+                try:
+                    self.refresh()
+                    self._current = f"f:{str(new_dir)}"
+                    self._set_current_in_tree(self._current, silent=False)
+                finally:
+                    self._force_expand_folder_paths = set()
+
+            QTimer.singleShot(0, do_refresh)
             return
+
+        # Game move
+        game_id = val
         game = self._games.get(game_id)
         if not game:
             return
         if not self._has_any_folders:
             return
 
-        dlg = MoveGameDialog(parent=self, root_folder=self._folder, current_folder=game.folder)
+        dlg = MoveGameDialog(parent=self, root_folder=self._folder, current_folder=game.folder, title="Move", allow_copy=True)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         dest = dlg.selected_folder()
@@ -1955,6 +2137,80 @@ class MainWindow(QMainWindow):
                 if sel:
                     self._current = sel
                     self._set_current_in_tree(sel, silent=False)
+            finally:
+                self._force_expand_folder_paths = set()
+
+        QTimer.singleShot(0, do_refresh)
+
+    def _move_games_to_folder(self, game_ids: list[str], dest_folder: Path) -> None:
+        # Batch move used by multi-select drag/drop.
+        if not game_ids:
+            return
+
+        # Preserve order but de-duplicate.
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for gid in game_ids:
+            g = str(gid or "").strip()
+            if not g or g in seen:
+                continue
+            seen.add(g)
+            ordered.append(g)
+
+        moves: list[tuple[Path, Path]] = []
+        for gid in ordered:
+            game = self._games.get(gid)
+            if not game:
+                continue
+            try:
+                if game.folder.resolve() == dest_folder.resolve():
+                    continue
+            except Exception:
+                if str(game.folder) == str(dest_folder):
+                    continue
+
+            dest_folder.mkdir(parents=True, exist_ok=True)
+            moves.extend(plan_move_game_files(game.folder, dest_folder, game.basename))
+
+        if not moves:
+            return
+
+        # Detect duplicate destinations among the move set (rename_many doesn't).
+        seen_dests: set[str] = set()
+        for _, dst in moves:
+            key = os.path.normcase(os.path.abspath(str(dst)))
+            if key in seen_dests:
+                QMessageBox.warning(self, "Move blocked", f"Multiple selected games would collide at: {dst}")
+                return
+            seen_dests.add(key)
+
+        try:
+            rename_many(moves)
+        except RenameCollisionError as e:
+            QMessageBox.warning(self, "Move blocked", str(e))
+            return
+        except Exception as e:
+            QMessageBox.warning(self, "Move failed", str(e))
+            return
+
+        # Expand destination folder and refresh once.
+        self._force_expand_folder_paths = {str(dest_folder)}
+
+        def do_refresh() -> None:
+            try:
+                self.refresh()
+                # Select destination folder (root has no visible folder node).
+                if self._folder is not None:
+                    try:
+                        is_root = dest_folder.resolve() == self._folder.resolve()
+                    except Exception:
+                        is_root = str(dest_folder) == str(self._folder)
+                    if not is_root:
+                        self._current = f"f:{str(dest_folder)}"
+                        self._set_current_in_tree(self._current, silent=False)
+                    else:
+                        self._tree.clearSelection()
+                        self._select_none()
             finally:
                 self._force_expand_folder_paths = set()
 
@@ -2655,8 +2911,9 @@ class MainWindow(QMainWindow):
         self._btn_rename.setText("Change Folder Name")
         self._btn_rename.setToolTip("Rename this folder and its folder-support files")
         if hasattr(self, "_btn_move"):
-            self._btn_move.setVisible(False)
-            self._btn_move.setEnabled(False)
+            self._btn_move.setVisible(True)
+            self._btn_move.setEnabled(True)
+            self._btn_move.setToolTip("Move this folder and its folder-support files")
 
         self._base_name.setText(f"Basename (folder): {assets.basename}")
         if len(assets.basename) > self._config.desired_max_base_file_length:
@@ -2677,6 +2934,47 @@ class MainWindow(QMainWindow):
         self._meta_editor.set_context(folder=assets.folder, basename=assets.basename, path=assets.metadata)
         self._set_images_context(assets)
         self._lbl_warnings.setText(f"Warnings: {len(self._compute_warning_codes(assets, include_rom_cfg=False))}")
+
+    def _select_multi(self, items: list[QTreeWidgetItem]) -> None:
+        # Multiple selection: do not show per-game details to avoid ambiguity.
+        self._current = None
+
+        game_count = 0
+        folder_count = 0
+        for item in items or []:
+            info = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+            if isinstance(info, dict) and info.get("type") == "game":
+                game_count += 1
+            elif isinstance(info, dict) and info.get("type") == "folder":
+                folder_count += 1
+
+        if game_count and folder_count:
+            self._base_name.setText(f"Multiple selected: {game_count} games, {folder_count} folders")
+        elif game_count:
+            self._base_name.setText(f"Multiple selected: {game_count} games")
+        elif folder_count:
+            self._base_name.setText(f"Multiple selected: {folder_count} folders")
+        else:
+            self._base_name.setText("Multiple selected")
+        self._base_warn.setText("")
+
+        self._rom_row.set_title("ROM")
+        self._cfg_row.set_title("Config")
+        self._btn_rename.setText("Change File Name")
+        self._btn_rename.setToolTip("Rename this game's files (basename)")
+
+        if hasattr(self, "_btn_move"):
+            self._btn_move.setVisible(False)
+            self._btn_move.setEnabled(False)
+
+        self._rom_row.set_context(folder=None, basename=None, existing=None, warning=None)
+        self._cfg_row.set_context(folder=None, basename=None, existing=None, warning=None)
+        self._rom_row.setEnabled(False)
+        self._cfg_row.setEnabled(False)
+        self._btn_rename.setEnabled(False)
+        self._meta_editor.set_context(folder=None, basename=None, path=None)
+        self._set_images_context(None)
+        self._lbl_warnings.setText("Warnings: 0")
 
     def _select_none(self) -> None:
         self._current = None
