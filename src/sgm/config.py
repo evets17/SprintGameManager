@@ -68,11 +68,82 @@ class AppConfig:
         return cfg
 
     @staticmethod
+    def _to_ini_kv(cfg: "AppConfig") -> dict[str, str]:
+        editors = cfg.metadata_editors or []
+        editors_clean = [str(e).strip() for e in editors if str(e).strip()]
+        editors_clean_sorted = sorted(editors_clean, key=lambda s: s.casefold())
+        return {
+            "LastGameFolder": (cfg.last_game_folder or "none"),
+            "Language": (cfg.language or "en").strip().lower() or "en",
+            "DesiredMaxBaseFileLength": str(int(cfg.desired_max_base_file_length)),
+            "DesiredNumberOfSnaps": str(int(cfg.desired_number_of_snaps)),
+            "BoxResolution": cfg.box_resolution.to_string(),
+            "BoxSmallResolution": cfg.box_small_resolution.to_string(),
+            "OverlayResolution": cfg.overlay_resolution.to_string(),
+            "OverlayBigResolution": cfg.overlay_big_resolution.to_string(),
+            "OverlayBuildResolution": cfg.overlay_build_resolution.to_string(),
+            "OverlayBuildPosition": f"{cfg.overlay_build_position[0]},{cfg.overlay_build_position[1]}",
+            "OverlayTemplateOverride": (cfg.overlay_template_override or ""),
+            "QrCodeResolution": cfg.qrcode_resolution.to_string(),
+            "SnapResolution": cfg.snap_resolution.to_string(),
+            "UseBoxImageForBoxSmall": "True" if cfg.use_box_image_for_box_small else "False",
+            "JzIntvMediaPrefix": (cfg.jzintv_media_prefix or "/media/usb0").strip() or "/media/usb0",
+            "MetadataEditors": "|".join(editors_clean_sorted),
+        }
+
+    @staticmethod
+    def _upgrade_ini_if_missing_keys(path: Path, *, defaults: "AppConfig") -> None:
+        """Ensure an existing ini contains all known keys.
+
+        Preserves existing file contents and values; only appends missing keys
+        with default values.
+        """
+
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return
+
+        present: set[str] = set()
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#") or line.startswith(";"):
+                continue
+            if "=" not in line:
+                continue
+            k, _ = line.split("=", 1)
+            key = k.strip()
+            if key:
+                present.add(key)
+
+        expected = AppConfig._to_ini_kv(defaults)
+        missing = [k for k in expected.keys() if k not in present]
+        if not missing:
+            return
+
+        # Append missing keys at the end to avoid rewriting/normalizing the file.
+        out = text
+        if out and not out.endswith("\n"):
+            out += "\n"
+        for k in missing:
+            out += f"{k}={expected[k]}\n"
+
+        try:
+            path.write_text(out, encoding="utf-8")
+        except Exception:
+            return
+
+    @staticmethod
     def load_or_create(path: Path) -> "AppConfig":
         if not path.exists():
             cfg = AppConfig.defaults()
             cfg.save(path)
             return cfg
+        # Upgrade existing ini files by appending any newly-added settings.
+        defaults = AppConfig.defaults()
+        AppConfig._upgrade_ini_if_missing_keys(path, defaults=defaults)
         return AppConfig.load(path)
 
     @staticmethod
@@ -156,27 +227,8 @@ class AppConfig:
         return cfg
 
     def save(self, path: Path) -> None:
-        editors = self.metadata_editors or []
-        editors_clean = [str(e).strip() for e in editors if str(e).strip()]
-        editors_clean_sorted = sorted(editors_clean, key=lambda s: s.casefold())
-        lines = [
-            "LastGameFolder=" + (self.last_game_folder or "none"),
-            f"Language={(self.language or 'en').strip().lower() or 'en'}",
-            f"DesiredMaxBaseFileLength={int(self.desired_max_base_file_length)}",
-            f"DesiredNumberOfSnaps={int(self.desired_number_of_snaps)}",
-            f"BoxResolution={self.box_resolution.to_string()}",
-            f"BoxSmallResolution={self.box_small_resolution.to_string()}",
-            f"OverlayResolution={self.overlay_resolution.to_string()}",
-            f"OverlayBigResolution={self.overlay_big_resolution.to_string()}",
-            f"OverlayBuildResolution={self.overlay_build_resolution.to_string()}",
-            f"OverlayBuildPosition={self.overlay_build_position[0]},{self.overlay_build_position[1]}",
-            f"OverlayTemplateOverride={self.overlay_template_override or ''}",
-            f"QrCodeResolution={self.qrcode_resolution.to_string()}",
-            f"SnapResolution={self.snap_resolution.to_string()}",
-            f"UseBoxImageForBoxSmall={'True' if self.use_box_image_for_box_small else 'False'}",
-            f"JzIntvMediaPrefix={(self.jzintv_media_prefix or '/media/usb0').strip()}",
-            "MetadataEditors=" + "|".join(editors_clean_sorted),
-        ]
+        kv = AppConfig._to_ini_kv(self)
+        lines = [f"{k}={v}" for k, v in kv.items()]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
