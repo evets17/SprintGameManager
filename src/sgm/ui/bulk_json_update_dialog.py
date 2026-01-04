@@ -182,6 +182,10 @@ class _TextPopupDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
+        try:
+            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
 
         self._edit = QPlainTextEdit()
         self._edit.setPlainText(str(text or ""))
@@ -411,6 +415,15 @@ class BulkJsonUpdateDialog(QDialog):
         form_field = QFormLayout(self._field_content)
         form_field.setContentsMargins(10, 0, 10, 10)
         form_field.setSpacing(8)
+        try:
+            form_field.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            form_field.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            form_field.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
 
         self._cmb_field = QComboBox()
         for spec in _STANDARD_FIELDS:
@@ -448,6 +461,15 @@ class BulkJsonUpdateDialog(QDialog):
         form_opt = QFormLayout(self._grp_opt)
         form_opt.setContentsMargins(10, 10, 10, 10)
         form_opt.setSpacing(8)
+        try:
+            form_opt.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            form_opt.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            form_opt.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
 
         self._cmb_update = QComboBox()
         self._cmb_update.addItem("No Change", "no_change")
@@ -477,6 +499,15 @@ class BulkJsonUpdateDialog(QDialog):
         opt_set_form = QFormLayout(self._opt_set)
         opt_set_form.setContentsMargins(0, 0, 0, 0)
         opt_set_form.setSpacing(6)
+        try:
+            opt_set_form.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            opt_set_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            opt_set_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
 
         opt_set_value = QWidget()
         opt_set_l = QHBoxLayout(opt_set_value)
@@ -484,6 +515,7 @@ class BulkJsonUpdateDialog(QDialog):
         opt_set_l.setSpacing(6)
         self._value_text = QLineEdit()
         self._value_text.setPlaceholderText("Value to set (text)")
+        self._value_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._value_text.setToolTip("Set Value: the exact text to store in the JSON field")
         self._value_text.textChanged.connect(self._inputs_changed)
         self._value_num = QSpinBox()
@@ -505,12 +537,23 @@ class BulkJsonUpdateDialog(QDialog):
         opt_replace_l = QFormLayout(self._opt_replace)
         opt_replace_l.setContentsMargins(0, 0, 0, 0)
         opt_replace_l.setSpacing(6)
+        try:
+            opt_replace_l.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            opt_replace_l.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            opt_replace_l.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
         self._txt_find = QLineEdit()
         self._txt_find.setPlaceholderText("Text to find")
+        self._txt_find.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_find.setToolTip("Replace Text: substring to search for in the current value")
         self._txt_find.textChanged.connect(self._inputs_changed)
         self._txt_replace = QLineEdit()
         self._txt_replace.setPlaceholderText("Replacement text")
+        self._txt_replace.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_replace.setToolTip("Replace Text: replacement for each occurrence of the Find text")
         self._txt_replace.textChanged.connect(self._inputs_changed)
         opt_replace_l.addRow("Find", self._txt_find)
@@ -521,8 +564,18 @@ class BulkJsonUpdateDialog(QDialog):
         opt_prefix_l = QFormLayout(self._opt_prefix)
         opt_prefix_l.setContentsMargins(0, 0, 0, 0)
         opt_prefix_l.setSpacing(6)
+        try:
+            opt_prefix_l.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            opt_prefix_l.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            opt_prefix_l.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
         self._txt_prefix = QLineEdit()
         self._txt_prefix.setPlaceholderText("Prefix to add")
+        self._txt_prefix.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_prefix.setToolTip(
             "Prefix Text: prepends this text to the current value.\n"
             "Tip: include a trailing space if you want a separator (e.g. 'MyPrefix ').\n"
@@ -536,8 +589,18 @@ class BulkJsonUpdateDialog(QDialog):
         opt_append_l = QFormLayout(self._opt_append)
         opt_append_l.setContentsMargins(0, 0, 0, 0)
         opt_append_l.setSpacing(6)
+        try:
+            opt_append_l.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            opt_append_l.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            opt_append_l.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
         self._txt_append = QLineEdit()
         self._txt_append.setPlaceholderText("Text to append")
+        self._txt_append.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_append.setToolTip(
             "Append Text: appends this text to the current value.\n"
             "Tip: include a leading space if you want a separator (e.g. ' Suffix').\n"
@@ -551,8 +614,18 @@ class BulkJsonUpdateDialog(QDialog):
         opt_regex_l = QFormLayout(self._opt_regex)
         opt_regex_l.setContentsMargins(0, 0, 0, 0)
         opt_regex_l.setSpacing(6)
+        try:
+            opt_regex_l.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            opt_regex_l.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            opt_regex_l.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
         self._txt_regex = QLineEdit()
         self._txt_regex.setPlaceholderText("Regex pattern")
+        self._txt_regex.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_regex.setToolTip(
             "Regular Expression: Python-style regex pattern applied to the current value.\n"
             "Example: '^The\\s+' to remove a leading 'The '."
@@ -560,6 +633,7 @@ class BulkJsonUpdateDialog(QDialog):
         self._txt_regex.textChanged.connect(self._inputs_changed)
         self._txt_regex_repl = QLineEdit()
         self._txt_regex_repl.setPlaceholderText("Regex replacement")
+        self._txt_regex_repl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_regex_repl.setToolTip(
             "Regular Expression: replacement text. You can use capture groups like \\1, \\2, etc.\n"
             "If the current value is missing, it is treated as empty string for regex evaluation."
@@ -622,6 +696,11 @@ class BulkJsonUpdateDialog(QDialog):
         form_filter = QFormLayout(self._filter_content)
         form_filter.setContentsMargins(10, 0, 10, 10)
         form_filter.setSpacing(8)
+        try:
+            form_filter.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            form_filter.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
 
         self._cmb_filter_game_op = QComboBox()
         for label, code in (
@@ -636,6 +715,7 @@ class BulkJsonUpdateDialog(QDialog):
         if idx_contains >= 0:
             self._cmb_filter_game_op.setCurrentIndex(idx_contains)
         self._txt_filter_game = QLineEdit()
+        self._txt_filter_game.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_filter_game.textChanged.connect(self._apply_filters)
         self._cmb_filter_game_op.currentIndexChanged.connect(self._apply_filters)
         w_game_filter = QWidget()
@@ -673,6 +753,7 @@ class BulkJsonUpdateDialog(QDialog):
         if idx_contains >= 0:
             self._cmb_filter_cur_op.setCurrentIndex(idx_contains)
         self._txt_filter_cur = QLineEdit()
+        self._txt_filter_cur.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._txt_filter_cur.textChanged.connect(self._apply_filters)
         self._cmb_filter_cur_op.currentIndexChanged.connect(self._apply_filters)
         w_cur_filter = QWidget()

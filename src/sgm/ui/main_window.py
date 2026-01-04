@@ -712,19 +712,33 @@ class MetadataEditor(QWidget):
 
         self._form = QFormLayout()
         self._form.setContentsMargins(0, 0, 0, 0)
+        try:
+            self._form.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            self._form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            self._form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
 
         self._name = QLineEdit()
         self._name.setPlaceholderText("name")
+        self._name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._form.addRow("Name", self._name)
 
         self._nb_players = QLineEdit()
         self._nb_players.setPlaceholderText("e.g. 1-2")
+        self._nb_players.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._form.addRow("Players", self._nb_players)
 
         self._editor = QComboBox()
         self._editor.setEditable(True)
         self._editor.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self._editor.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self._editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Prefer a sensible minimum width while still allowing the control to stretch.
+        self._editor.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._editor.setMinimumContentsLength(16)
         if self._metadata_editors:
             self._editor.addItems(self._metadata_editors)
         self._editor.setEditText("")
@@ -770,6 +784,15 @@ class MetadataEditor(QWidget):
         self._others_group = QGroupBox("Others")
         self._others_group.setVisible(False)
         self._others_form = QFormLayout(self._others_group)
+        try:
+            self._others_form.setFormAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
+        try:
+            self._others_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+            self._others_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        except Exception:
+            pass
         self._others_form.setContentsMargins(8, 8, 8, 8)
         self._others_form.setSpacing(6)
         fields_l.addWidget(self._others_group)
@@ -1019,6 +1042,7 @@ class MetadataEditor(QWidget):
             if isinstance(value, str):
                 w = QLineEdit()
                 w.setText(value)
+                w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 w.textChanged.connect(self._mark_dirty)
                 self._others_simple_widgets[str(key)] = w
                 self._others_form.addRow(str(key), w)
@@ -1248,6 +1272,10 @@ class OverlayBuildDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
+        try:
+            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
 
         layout.addWidget(QLabel("Choose source for the bottom image:"))
 
@@ -1295,6 +1323,10 @@ class QrUrlDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
+        try:
+            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
 
         layout.addWidget(QLabel("Enter URL:"))
 
@@ -1303,6 +1335,7 @@ class QrUrlDialog(QDialog):
 
         self._edit = QLineEdit()
         self._edit.setPlaceholderText("https://...")
+        self._edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row.addWidget(self._edit, 1)
 
         btn_paste = QPushButton("Paste")
@@ -1355,6 +1388,10 @@ class ConfigLookupDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
+        try:
+            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
 
         self._tabs = QTabWidget()
         layout.addWidget(self._tabs, 1)
@@ -1388,6 +1425,7 @@ class ConfigLookupDialog(QDialog):
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Search:"))
         self._search = QLineEdit()
+        self._search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._search.textChanged.connect(self._apply_filter)
         search_row.addWidget(self._search, 1)
         tab_search_l.addLayout(search_row)
@@ -1509,10 +1547,15 @@ class RenameBasenameDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
+        try:
+            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
 
         layout.addWidget(QLabel("New basename:"))
         self._edit = QLineEdit()
         self._edit.setText(initial)
+        self._edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._edit.selectAll()
         layout.addWidget(self._edit)
 
@@ -1551,6 +1594,10 @@ class CreateFolderDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
+        try:
+            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
 
         layout.addWidget(QLabel("Create under:"))
         crumbs = QWidget()
@@ -1561,6 +1608,7 @@ class CreateFolderDialog(QDialog):
 
         layout.addWidget(QLabel("Folder name:"))
         self._edit = QLineEdit()
+        self._edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self._edit)
 
         row = QHBoxLayout()
@@ -1647,6 +1695,10 @@ class MoveGameDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
+        try:
+            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        except Exception:
+            pass
 
         layout.addWidget(QLabel("Move to:"))
 
