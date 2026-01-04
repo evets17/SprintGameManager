@@ -710,16 +710,16 @@ class MetadataEditor(QWidget):
         fields_l = QVBoxLayout(self._fields)
         fields_l.setContentsMargins(0, 0, 0, 0)
 
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
+        self._form = QFormLayout()
+        self._form.setContentsMargins(0, 0, 0, 0)
 
         self._name = QLineEdit()
         self._name.setPlaceholderText("name")
-        form.addRow("Name", self._name)
+        self._form.addRow("Name", self._name)
 
         self._nb_players = QLineEdit()
         self._nb_players.setPlaceholderText("e.g. 1-2")
-        form.addRow("Players", self._nb_players)
+        self._form.addRow("Players", self._nb_players)
 
         self._editor = QComboBox()
         self._editor.setEditable(True)
@@ -728,18 +728,19 @@ class MetadataEditor(QWidget):
         if self._metadata_editors:
             self._editor.addItems(self._metadata_editors)
         self._editor.setEditText("")
-        form.addRow("Editor", self._editor)
+        self._form.addRow("Editor", self._editor)
 
         self._year = QSpinBox()
         self._year.setRange(0, 9999)
         # Qt shows the numeric minimum when specialValueText is empty.
         # Use a single space so year=0 displays as blank in the UI.
         self._year.setSpecialValueText(" ")
-        form.addRow("Year", self._year)
+        self._form.addRow("Year", self._year)
 
-        fields_l.addLayout(form)
+        fields_l.addLayout(self._form)
 
-        fields_l.addWidget(QLabel("Description"))
+        self._lbl_desc = QLabel("Description")
+        fields_l.addWidget(self._lbl_desc)
         self._desc_tabs = QTabWidget()
         self._desc_edits: dict[str, QTextEdit] = {}
         for lang in self.LANGS:
@@ -787,6 +788,55 @@ class MetadataEditor(QWidget):
         for edit in self._desc_edits.values():
             edit.textChanged.connect(self._mark_dirty)
 
+        # Keep required-field label styling in sync as the user edits.
+        self._name.textChanged.connect(lambda *_: self._update_required_label_styles())
+        self._nb_players.textChanged.connect(lambda *_: self._update_required_label_styles())
+        self._editor.currentTextChanged.connect(lambda *_: self._update_required_label_styles())
+        self._year.valueChanged.connect(lambda *_: self._update_required_label_styles())
+        for edit in self._desc_edits.values():
+            edit.textChanged.connect(lambda *_: self._update_required_label_styles())
+
+        self._update_required_label_styles()
+
+    def _set_label_missing(self, label: QWidget | None, missing: bool) -> None:
+        if label is None:
+            return
+        if missing:
+            label.setStyleSheet("color: red;")
+        else:
+            label.setStyleSheet("")
+
+    def _update_required_label_styles(self) -> None:
+        """Show missing standard fields in red; do not affect the 'Others' section."""
+
+        # If fields are hidden/disabled, keep labels neutral.
+        if not self._fields.isVisible() or not self._fields.isEnabled():
+            self._set_label_missing(self._form.labelForField(self._name), False)
+            self._set_label_missing(self._form.labelForField(self._nb_players), False)
+            self._set_label_missing(self._form.labelForField(self._editor), False)
+            self._set_label_missing(self._form.labelForField(self._year), False)
+            self._set_label_missing(getattr(self, "_lbl_desc", None), False)
+            return
+
+        name_missing = (self._name.text() or "").strip() == ""
+
+        players_s = (self._nb_players.text() or "").strip()
+        players_missing = players_s == "" or players_s == "0"
+
+        editor_missing = (self._editor.currentText() or "").strip() == ""
+        year_missing = int(self._year.value()) == 0
+
+        pref = (self._preferred_language or "en").strip().lower() or "en"
+        if pref not in self.LANGS:
+            pref = "en"
+        desc_missing = (self._desc_edits.get(pref).toPlainText() if self._desc_edits.get(pref) else "").strip() == ""
+
+        self._set_label_missing(self._form.labelForField(self._name), name_missing)
+        self._set_label_missing(self._form.labelForField(self._nb_players), players_missing)
+        self._set_label_missing(self._form.labelForField(self._editor), editor_missing)
+        self._set_label_missing(self._form.labelForField(self._year), year_missing)
+        self._set_label_missing(getattr(self, "_lbl_desc", None), desc_missing)
+
     def set_context(
         self,
         *,
@@ -811,6 +861,7 @@ class MetadataEditor(QWidget):
             self._set_fields_enabled(False)
             self._fields.setVisible(False)
             self._bottom_spacer.setVisible(True)
+            self._update_required_label_styles()
             return
 
         if path is None or not path.exists():
@@ -822,6 +873,7 @@ class MetadataEditor(QWidget):
             self._set_defaults(basename)
             self._fields.setVisible(False)
             self._bottom_spacer.setVisible(True)
+            self._update_required_label_styles()
             return
 
         self._warning.setText("")
@@ -834,6 +886,7 @@ class MetadataEditor(QWidget):
         if allow_advanced:
             self._btn_advanced.setEnabled(True)
         self._load(path)
+        self._update_required_label_styles()
 
     def set_bulk_context(self, game_ids: list[str]) -> None:
         # Multi-select: hide per-game controls; bulk updater is launched from the main window.
@@ -843,6 +896,7 @@ class MetadataEditor(QWidget):
         self._fields.setVisible(False)
         self._bottom_spacer.setVisible(True)
         self._warning.setText("")
+        self._update_required_label_styles()
 
     def reload_from_disk(self) -> None:
         if self._path is None or not self._path.exists():
@@ -871,6 +925,7 @@ class MetadataEditor(QWidget):
         self._btn_advanced.setEnabled(bool(allow_advanced and path is not None and path.exists()))
 
         if not folder or not basename:
+            self._update_required_label_styles()
             return
 
         if path is None or not path.exists():
@@ -879,12 +934,14 @@ class MetadataEditor(QWidget):
             self._btn_action.setText("Create JSON")
             self._btn_action.setVisible(True)
             self._btn_action.setEnabled(True)
+            self._update_required_label_styles()
             return
 
         self._warning.setText("")
         self._btn_action.setText("Save")
         self._btn_action.setVisible(True)
         self._btn_action.setEnabled(bool(self._dirty))
+        self._update_required_label_styles()
 
     def _advanced_clicked(self) -> None:
         if self._path is None or not self._path.exists():
@@ -986,6 +1043,7 @@ class MetadataEditor(QWidget):
         self._year.setValue(0)
         for lang, edit in self._desc_edits.items():
             edit.setPlainText("")
+        self._update_required_label_styles()
 
     def _load(self, path: Path) -> None:
         try:
@@ -1042,6 +1100,7 @@ class MetadataEditor(QWidget):
 
         self._dirty = False
         self._btn_action.setEnabled(False)
+        self._update_required_label_styles()
 
     def _action_clicked(self) -> None:
         if not self._folder or not self._basename:
