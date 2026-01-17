@@ -68,7 +68,7 @@ from sgm.io_utils import (
     rename_many,
     swap_files,
 )
-from sgm.scanner import _classify, scan_folder
+from sgm.scanner import _classify, scan_folder, _sanitize_basename
 from sgm.ui.advanced_json_dialog import AdvancedJsonDialog
 from sgm.ui.bulk_json_update_dialog import BulkJsonUpdateDialog
 from sgm.ui.overlay_cleaner_dialog import OverlayImageCleanerDialog
@@ -726,6 +726,7 @@ class MetadataEditor(QWidget):
         self._name = QLineEdit()
         self._name.setPlaceholderText("name")
         self._name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._name.textChanged.connect(self._sanitize_name_input)
         self._form.addRow("Name", self._name)
 
         self._nb_players = QLineEdit()
@@ -1176,6 +1177,12 @@ class MetadataEditor(QWidget):
         self._on_saved()
         # Show fields immediately for this selection.
         self.set_context(folder=self._folder, basename=self._basename, path=path)
+
+    def _sanitize_name_input(self, text: str) -> None:
+        """Remove apostrophes from the name input field as they're not supported by Sprint."""
+        if "'" in text:
+            with QSignalBlocker(self._name):
+                self._name.setText(_sanitize_basename(text))
 
     def _mark_dirty(self, *args) -> None:
         if self._path is None or not self._path.exists():
@@ -2824,6 +2831,7 @@ class MainWindow(QMainWindow):
     def _init_analyze_filters(self) -> None:
         # Stable filter list so users can toggle specific warnings (e.g., missing overlay).
         ordered: list[tuple[str, str]] = [
+            ("apostrophe:basename", "Apostrophe in name"),
             ("longname", "Long name"),
             ("missing:rom", "Missing ROM"),
             ("missing:cfg", "Missing Config"),
@@ -3097,6 +3105,9 @@ class MainWindow(QMainWindow):
 
         if len(game.basename) > self._config.desired_max_base_file_length:
             codes.add("longname")
+
+        if "'" in game.basename:
+            codes.add("apostrophe:basename")
 
         if include_rom_cfg:
             if game.rom is None:

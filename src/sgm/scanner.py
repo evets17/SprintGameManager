@@ -13,6 +13,11 @@ from sgm.domain import GameAssets, ROM_EXTS, choose_rom
 SUPPORTED_EXTS = {".bin", ".int", ".rom", ".cfg", ".json", ".png"}
 
 
+def _sanitize_basename(basename: str) -> str:
+    """Remove apostrophes from basename as they are not supported by Sprint."""
+    return basename.replace("'", "")
+
+
 @dataclass(frozen=True)
 class ScanResult:
     folder: Path
@@ -217,37 +222,37 @@ def _classify(path: Path) -> tuple[str | None, str | None]:
     stem = path.stem
 
     if suffix in ROM_EXTS:
-        return stem, "rom"
+        return _sanitize_basename(stem), "rom"
     if suffix == ".cfg":
         # Some games folders include palette/config helper files that are not game configs.
         # If the filename contains "palette" anywhere, ignore it for game discovery.
         if "palette" in path.name.casefold():
             return None, None
-        return stem, "config"
+        return _sanitize_basename(stem), "config"
     if suffix == ".json":
-        return stem, "metadata"
+        return _sanitize_basename(stem), "metadata"
     if suffix != ".png":
         return None, None
 
     lower = stem.lower()
 
     if lower.endswith("_big_overlay"):
-        return stem[: -len("_big_overlay")], "overlay_big"
+        return _sanitize_basename(stem[: -len("_big_overlay")]), "overlay_big"
     if lower.endswith("_overlay2"):
-        return stem[: -len("_overlay2")], "overlay2"
+        return _sanitize_basename(stem[: -len("_overlay2")]), "overlay2"
     if lower.endswith("_overlay3"):
-        return stem[: -len("_overlay3")], "overlay3"
+        return _sanitize_basename(stem[: -len("_overlay3")]), "overlay3"
     if lower.endswith("_overlay"):
-        return stem[: -len("_overlay")], "overlay"
+        return _sanitize_basename(stem[: -len("_overlay")]), "overlay"
     if lower.endswith("_qrcode"):
-        return stem[: -len("_qrcode")], "qrcode"
+        return _sanitize_basename(stem[: -len("_qrcode")]), "qrcode"
     if lower.endswith("_small"):
-        return stem[: -len("_small")], "box_small"
+        return _sanitize_basename(stem[: -len("_small")]), "box_small"
 
     for i in (1, 2, 3):
         token = f"_snap{i}"
         if lower.endswith(token):
-            return stem[: -len(token)], f"snap{i}"
+            return _sanitize_basename(stem[: -len(token)]), f"snap{i}"
 
     # Default .png with no recognized suffix is box art.
-    return stem, "box"
+    return _sanitize_basename(stem), "box"
