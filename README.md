@@ -2,6 +2,42 @@
 
 Desktop GUI for managing Intellivision Sprint Console games (ROM, config, metadata, and images) for sideloading.
 
+**Supported Platforms:** Windows, macOS, Linux
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph UI["PySide6 GUI"]
+        GameList["Game List Panel"]
+        Details["Details Panel"]
+        Metadata["Metadata Editor"]
+        ImageCards["Image Cards"]
+    end
+
+    subgraph Core["Core Logic"]
+        FileOps["File Operations"]
+        Validation["Resolution Validation"]
+        Config["Config Manager<br/>(sgm.ini)"]
+    end
+
+    subgraph Assets["Game Assets"]
+        ROM[".bin / .int / .rom"]
+        CFG[".cfg"]
+        JSON[".json metadata"]
+        Images["PNG images<br/>(box, overlay, snap, qr)"]
+    end
+
+    GameList --> FileOps
+    Details --> FileOps
+    Metadata --> JSON
+    ImageCards --> Validation
+    Validation --> Images
+    FileOps --> ROM
+    FileOps --> CFG
+    Config --> UI
+```
+
 ## Using the app (end users)
 
 ### 1) Pick your games folder
@@ -86,7 +122,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Build standalone EXE (Windows)
+### Build standalone executable
+
+#### Windows
 
 ```powershell
 . .\.venv\Scripts\Activate.ps1
@@ -96,6 +134,28 @@ pip install -r requirements-build.txt
 ```
 
 Output: `dist\SprintGameManager.exe`
+
+#### Linux
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-build.txt
+./build_exe_linux.sh
+```
+
+Output: `dist/SprintGameManager`
+
+#### macOS
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-build.txt
+./build_exe_mac.sh
+```
+
+Output: `dist/SprintGameManager.app`
 
 ### App config
 
