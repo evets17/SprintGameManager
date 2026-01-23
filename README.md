@@ -8,24 +8,24 @@ Desktop GUI for managing Intellivision Sprint Console games (ROM, config, metada
 
 ```mermaid
 flowchart TB
-    subgraph UI["PySide6 GUI"]
-        GameList["Game List Panel"]
-        Details["Details Panel"]
-        Metadata["Metadata Editor"]
-        ImageCards["Image Cards"]
+    subgraph UI["🖥️ PySide6 GUI"]
+        GameList["📋 Game List Panel"]
+        Details["📝 Details Panel"]
+        Metadata["✏️ Metadata Editor"]
+        ImageCards["🖼️ Image Cards"]
     end
 
-    subgraph Core["Core Logic"]
-        FileOps["File Operations"]
-        Validation["Resolution Validation"]
-        Config["Config Manager<br/>(sgm.ini)"]
+    subgraph Core["⚙️ Core Logic"]
+        FileOps["📁 File Operations"]
+        Validation["🔍 Resolution Validation"]
+        Config["⚡ Config Manager<br/>(sgm.ini)"]
     end
 
-    subgraph Assets["Game Assets"]
-        ROM[".bin / .int / .rom"]
-        CFG[".cfg"]
-        JSON[".json metadata"]
-        Images["PNG images<br/>(box, overlay, snap, qr)"]
+    subgraph Assets["🎮 Game Assets"]
+        ROM["💾 .bin / .int / .rom"]
+        CFG["📄 .cfg"]
+        JSON["📋 .json metadata"]
+        Images["🎨 PNG images<br/>(box, overlay, snap, qr)"]
     end
 
     GameList --> FileOps
@@ -36,6 +36,24 @@ flowchart TB
     FileOps --> ROM
     FileOps --> CFG
     Config --> UI
+
+    style UI fill:#1e3a5f,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style Core fill:#3b1f5f,stroke:#a855f7,stroke-width:2px,color:#fff
+    style Assets fill:#1f4f3a,stroke:#22c55e,stroke-width:2px,color:#fff
+    
+    style GameList fill:#2563eb,stroke:#60a5fa,color:#fff
+    style Details fill:#2563eb,stroke:#60a5fa,color:#fff
+    style Metadata fill:#2563eb,stroke:#60a5fa,color:#fff
+    style ImageCards fill:#2563eb,stroke:#60a5fa,color:#fff
+    
+    style FileOps fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Validation fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Config fill:#7c3aed,stroke:#a78bfa,color:#fff
+    
+    style ROM fill:#16a34a,stroke:#4ade80,color:#fff
+    style CFG fill:#16a34a,stroke:#4ade80,color:#fff
+    style JSON fill:#16a34a,stroke:#4ade80,color:#fff
+    style Images fill:#16a34a,stroke:#4ade80,color:#fff
 ```
 
 ## Using the app (end users)
