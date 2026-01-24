@@ -269,7 +269,7 @@ class OverlayBuilderDialog(QDialog):
         bottom.addStretch(1)
 
         self._btn_use = QPushButton("Use This Image")
-        self._btn_use.setToolTip("Save overlay.png using the current settings")
+        self._btn_use.setToolTip(f"Save {self._overlay_dest.name} using the current settings")
         self._btn_use.clicked.connect(self._save_overlay)
         bottom.addWidget(self._btn_use)
 

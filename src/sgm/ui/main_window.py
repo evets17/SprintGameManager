@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 import os
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QBrush, QColor, QIcon, QPalette, QDesktopServices
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPalette, QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -71,6 +71,7 @@ from sgm.ui.advanced_json_dialog import AdvancedJsonDialog
 from sgm.ui.bulk_json_update_dialog import BulkJsonUpdateDialog
 from sgm.ui.overlay_cleaner_dialog import OverlayImageCleanerDialog
 from sgm.ui.overlay_builder_dialog import OverlayBuilderDialog
+from sgm.ui.settings_dialog import SettingsDialog
 from sgm.ui.widgets import ImageCard, ImageSpec, OverlayCard, OverlayPrimaryCard, SnapshotCard
 from sgm.ui.dialog_state import get_start_dir, remember_path
 from sgm.version import main_window_title
@@ -97,6 +98,27 @@ def _is_hidden_dir(p: Path) -> bool:
         except Exception:
             return False
     return False
+
+
+def _icon_from_svg(path: Path) -> QIcon:
+    try:
+        from PySide6.QtSvg import QSvgRenderer
+
+        renderer = QSvgRenderer(str(path))
+        if not renderer.isValid():
+            return QIcon(str(path))
+
+        size = renderer.defaultSize()
+        w = size.width() if size.width() > 0 else 64
+        h = size.height() if size.height() > 0 else 64
+        pix = QPixmap(w, h)
+        pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pix)
+        renderer.render(painter)
+        painter.end()
+        return QIcon(pix)
+    except Exception:
+        return QIcon(str(path))
 
 
 def _parse_overlay_template_override(raw: str) -> list[Path]:
@@ -887,6 +909,28 @@ class MetadataEditor(QWidget):
         self._set_label_missing(self._form.labelForField(self._editor), editor_missing)
         self._set_label_missing(self._form.labelForField(self._year), year_missing)
         self._set_label_missing(getattr(self, "_lbl_desc", None), desc_missing)
+
+    def set_preferred_language(self, lang: str, *, set_tab: bool = True) -> None:
+        pref = (lang or "en").strip().lower() or "en"
+        if pref not in self.LANGS:
+            pref = "en"
+        self._preferred_language = pref
+        if set_tab:
+            try:
+                self._desc_tabs.setCurrentIndex(self.LANGS.index(self._preferred_language))
+            except Exception:
+                pass
+        self._update_required_label_styles()
+
+    def set_metadata_editors(self, editors: list[str]) -> None:
+        self._metadata_editors = list(editors or [])
+        current = (self._editor.currentText() or "").strip()
+        self._editor.blockSignals(True)
+        self._editor.clear()
+        if self._metadata_editors:
+            self._editor.addItems(self._metadata_editors)
+        self._editor.setEditText(current)
+        self._editor.blockSignals(False)
 
     def set_context(
         self,
@@ -1848,15 +1892,15 @@ class MainWindow(QMainWindow):
         self._lbl_warnings = QLabel("Warnings: 0")
         top.addWidget(self._lbl_warnings)
 
-        self._btn_open_ini = QToolButton()
-        self._btn_open_ini.setToolTip("Open sgm.ini in default editor")
-        self._btn_open_ini.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._btn_open_ini.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        self._btn_open_ini.setFixedSize(btn_size)
-        self._btn_open_ini.setIconSize(icon_size)
-        self._btn_open_ini.setStyleSheet("QToolButton { padding: 0px; }")
-        self._btn_open_ini.clicked.connect(self._open_ini_clicked)
-        top.addWidget(self._btn_open_ini)
+        self._btn_settings = QToolButton()
+        self._btn_settings.setToolTip("Settings")
+        self._btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self._btn_settings.setIcon(_icon_from_svg(resource_path("settings.svg")))
+        self._btn_settings.setFixedSize(btn_size)
+        self._btn_settings.setIconSize(icon_size)
+        self._btn_settings.setStyleSheet("QToolButton { padding: 0px; }")
+        self._btn_settings.clicked.connect(self._open_settings_clicked)
+        top.addWidget(self._btn_settings)
 
         root_layout.addLayout(top)
 
@@ -2063,6 +2107,42 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(ini_path)))
         except Exception as e:
             QMessageBox.warning(self, "Open sgm.ini", str(e))
+
+    def _open_settings_clicked(self) -> None:
+        dlg = SettingsDialog(
+            parent=self,
+            config=self._config,
+            config_path=self._config_path,
+            on_changed=self._settings_changed,
+            on_open_ini=self._open_ini_clicked,
+        )
+        dlg.exec()
+
+    def _settings_changed(self, key: str) -> None:
+        if key == "Language":
+            if hasattr(self, "_meta_editor"):
+                try:
+                    self._meta_editor.set_preferred_language(self._config.language)
+                except Exception:
+                    pass
+            self.refresh(preserve_metadata_edits=True)
+            return
+
+        if key == "MetadataEditors":
+            if hasattr(self, "_meta_editor"):
+                try:
+                    self._meta_editor.set_metadata_editors(self._config.metadata_editors or [])
+                except Exception:
+                    pass
+            return
+
+        if key in {
+            "PaletteExtensions",
+            "DesiredMaxBaseFileLength",
+            "DesiredNumberOfSnaps",
+        }:
+            self.refresh(preserve_metadata_edits=True)
+            return
 
     def _open_cfg_clicked(self) -> None:
         try:

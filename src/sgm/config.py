@@ -98,7 +98,6 @@ class AppConfig:
     def _to_ini_kv(cfg: "AppConfig") -> dict[str, str]:
         editors = cfg.metadata_editors or []
         editors_clean = [str(e).strip() for e in editors if str(e).strip()]
-        editors_clean_sorted = sorted(editors_clean, key=lambda s: s.casefold())
 
         json_keys = cfg.json_keys or []
         json_keys_clean: list[str] = []
@@ -128,7 +127,7 @@ class AppConfig:
             "ConfirmImageOverwrite": "True" if cfg.confirm_image_overwrite else "False",
             "JzIntvMediaPrefix": (cfg.jzintv_media_prefix or "/media/usb0").strip() or "/media/usb0",
             "PaletteExtensions": "|".join(_normalize_extensions(cfg.palette_extensions or [])),
-            "MetadataEditors": "|".join(editors_clean_sorted),
+            "MetadataEditors": "|".join(editors_clean),
             "JsonKeys": "|".join(json_keys_clean),
         }
 
@@ -322,8 +321,6 @@ def _parse_position(value: str | None, *, default: tuple[int, int]) -> tuple[int
         a, b = raw.split(",", 1)
         x = int(a)
         y = int(b)
-        if x < 0 or y < 0:
-            return default
         return (x, y)
     except Exception:
         return default
