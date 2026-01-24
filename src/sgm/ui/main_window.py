@@ -51,11 +51,9 @@ from sgm.config import AppConfig
 from sgm.domain import GameAssets
 from sgm.image_ops import (
     ImageProcessError,
-    build_overlay_png,
     build_overlay_png_from_file,
     generate_qr_png,
     get_image_size,
-    pil_from_qimage,
     save_png_resized_from_file,
 )
 from sgm.resources import resource_path, resources_dir
@@ -72,6 +70,7 @@ from sgm.scanner import _classify, scan_folder
 from sgm.ui.advanced_json_dialog import AdvancedJsonDialog
 from sgm.ui.bulk_json_update_dialog import BulkJsonUpdateDialog
 from sgm.ui.overlay_cleaner_dialog import OverlayImageCleanerDialog
+from sgm.ui.overlay_builder_dialog import OverlayBuilderDialog
 from sgm.ui.widgets import ImageCard, ImageSpec, OverlayCard, OverlayPrimaryCard, SnapshotCard
 from sgm.ui.dialog_state import get_start_dir, remember_path
 from sgm.version import main_window_title
@@ -79,6 +78,7 @@ from sgm.sprint_fs import sprint_name_key, sprint_path_key
 
 
 ACCEPTED_ADD_EXTS = {".bin", ".int", ".rom", ".cfg", ".json", ".png"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 
 
 def _is_hidden_dir(p: Path) -> bool:
@@ -97,6 +97,33 @@ def _is_hidden_dir(p: Path) -> bool:
         except Exception:
             return False
     return False
+
+
+def _parse_overlay_template_override(raw: str) -> list[Path]:
+    value = (raw or "").strip()
+    if not value:
+        return []
+    parts = value.split("|") if "|" in value else value.split(",")
+    out: list[Path] = []
+    seen: set[str] = set()
+    for p in parts:
+        s = p.strip()
+        if not s:
+            continue
+        try:
+            path = Path(s).expanduser()
+        except Exception:
+            path = Path(s)
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+
+def _is_image_path(p: Path) -> bool:
+    return p.suffix.lower() in IMAGE_EXTS
 
 
 class GamesTreeWidget(QTreeWidget):
@@ -1264,58 +1291,6 @@ class SnapshotsRow(QWidget):
         self._on_reorder(src_index, dst_index)
 
 
-class OverlayBuildDialog(QDialog):
-    def __init__(self, *, parent: QWidget, can_use_big_overlay: bool):
-        super().__init__(parent)
-        self.choice: str | None = None
-        self.setWindowTitle("Build Overlay")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(6)
-        try:
-            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        except Exception:
-            pass
-
-        layout.addWidget(QLabel("Choose source for the bottom image:"))
-
-        row = QHBoxLayout()
-        btn_browse = QPushButton("Browse")
-        btn_paste = QPushButton("Paste")
-        btn_big = QPushButton("Use Big Overlay")
-        btn_big.setEnabled(can_use_big_overlay)
-
-        btn_browse.clicked.connect(self._choose_browse)
-        btn_paste.clicked.connect(self._choose_paste)
-        btn_big.clicked.connect(self._choose_big)
-
-        row.addWidget(btn_browse)
-        row.addWidget(btn_paste)
-        row.addWidget(btn_big)
-        row.addStretch(1)
-        layout.addLayout(row)
-
-        cancel_row = QHBoxLayout()
-        cancel_row.addStretch(1)
-        btn_cancel = QPushButton("Cancel")
-        btn_cancel.clicked.connect(self.reject)
-        cancel_row.addWidget(btn_cancel)
-        layout.addLayout(cancel_row)
-
-    def _choose_browse(self) -> None:
-        self.choice = "browse"
-        self.accept()
-
-    def _choose_paste(self) -> None:
-        self.choice = "paste"
-        self.accept()
-
-    def _choose_big(self) -> None:
-        self.choice = "big"
-        self.accept()
-
-
 class QrUrlDialog(QDialog):
     def __init__(self, *, parent: QWidget):
         super().__init__(parent)
@@ -2123,7 +2098,7 @@ class MainWindow(QMainWindow):
     def refresh(self, *, preserve_metadata_edits: bool = False) -> None:
         if not self._folder:
             return
-        scan = scan_folder(self._folder)
+        scan = scan_folder(self._folder, palette_exts=set(self._config.palette_extensions or []))
         self._games = scan.games
         self._folder_assets = scan.folders
         self._palette_files = list(scan.palette_files)
@@ -4014,10 +3989,13 @@ class MainWindow(QMainWindow):
             dest = dest_root / src.name
             overwrite = False
             if dest.exists():
-                resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
-                if resp != QMessageBox.StandardButton.Yes:
-                    continue
-                overwrite = True
+                if _is_image_path(dest) and not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                    overwrite = True
+                else:
+                    resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
+                    if resp != QMessageBox.StandardButton.Yes:
+                        continue
+                    overwrite = True
             try:
                 copy_file(src, dest, overwrite=overwrite)
             except Exception as e:
@@ -4065,10 +4043,13 @@ class MainWindow(QMainWindow):
     def _copy_with_prompt(self, src: Path, dest: Path) -> None:
         overwrite = False
         if dest.exists():
-            resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
-            if resp != QMessageBox.StandardButton.Yes:
-                return
-            overwrite = True
+            if _is_image_path(dest) and not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                overwrite = True
+            else:
+                resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
+                overwrite = True
         try:
             copy_file(src, dest, overwrite=overwrite)
         except Exception as e:
@@ -4265,12 +4246,13 @@ class MainWindow(QMainWindow):
             self.refresh(preserve_metadata_edits=True)
             return
 
-        blank_default = resource_path("Overlay_blank.png")
+        blank_default = resource_path("Overlay_empty.png")
         override_raw = (self._config.overlay_template_override or "").strip()
-        blank = Path(override_raw).expanduser() if override_raw else blank_default
+        override_list = _parse_overlay_template_override(override_raw)
+        blank = override_list[0] if override_list else blank_default
         if not blank.exists():
             msg = f"Missing overlay template. Expected {blank_default}"
-            if override_raw:
+            if override_list:
                 msg = f"Missing overlay template override: {blank}"
             QMessageBox.warning(self, "AutoBuildOverlay", msg)
             self.refresh(preserve_metadata_edits=True)
@@ -4344,21 +4326,6 @@ class MainWindow(QMainWindow):
         if not game:
             return
 
-        can_use_big = bool(game.overlay_big and game.overlay_big.exists())
-        dlg = OverlayBuildDialog(parent=self, can_use_big_overlay=can_use_big)
-        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.choice:
-            return
-
-        blank_default = resource_path("Overlay_blank.png")
-        override_raw = (self._config.overlay_template_override or "").strip()
-        blank = Path(override_raw).expanduser() if override_raw else blank_default
-        if not blank.exists():
-            msg = f"Missing overlay template. Expected {blank_default}"
-            if override_raw:
-                msg = f"Missing overlay template override: {blank}"
-            QMessageBox.warning(self, "Build Overlay", msg)
-            return
-
         if which not in (1, 2, 3):
             return
 
@@ -4372,66 +4339,23 @@ class MainWindow(QMainWindow):
             dest = overlay2
         else:
             dest = overlay3
+
         if dest.exists():
-            resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
-            if resp != QMessageBox.StandardButton.Yes:
-                return
-
-        build_res = self._config.overlay_build_resolution
-        pos = self._config.overlay_build_position
-
-        try:
-            if dlg.choice == "browse":
-                path, _ = QFileDialog.getOpenFileName(
-                    self,
-                    "Select bottom image",
-                    get_start_dir(game.folder),
-                    "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*.*)",
-                )
-                if not path:
-                    return
-                remember_path(path)
-                build_overlay_png_from_file(
-                    blank,
-                    Path(path),
-                    dest,
-                    overlay_resolution=self._config.overlay_resolution,
-                    build_resolution=build_res,
-                    position=pos,
-                )
-            elif dlg.choice == "paste":
-                qimg = QApplication.clipboard().image()
-                if qimg.isNull():
-                    QMessageBox.information(self, "Build Overlay", "Clipboard does not contain an image")
-                    return
-                bottom = pil_from_qimage(qimg)
-                build_overlay_png(
-                    blank,
-                    bottom,
-                    dest,
-                    overlay_resolution=self._config.overlay_resolution,
-                    build_resolution=build_res,
-                    position=pos,
-                )
-            elif dlg.choice == "big":
-                if not can_use_big or not game.overlay_big:
-                    QMessageBox.information(self, "Build Overlay", "Big Overlay is missing")
-                    return
-                build_overlay_png_from_file(
-                    blank,
-                    game.overlay_big,
-                    dest,
-                    overlay_resolution=self._config.overlay_resolution,
-                    build_resolution=build_res,
-                    position=pos,
-                )
+            if not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                pass
             else:
-                return
-        except ImageProcessError as e:
-            QMessageBox.warning(self, "Build Overlay", str(e))
-            return
-        except Exception as e:
-            QMessageBox.warning(self, "Build Overlay", str(e))
+                resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
+
+        dlg = OverlayBuilderDialog(
+            parent=self,
+            config=self._config,
+            config_path=self._config_path,
+            overlay_dest=dest,
+            big_overlay_path=game.overlay_big if game.overlay_big and game.overlay_big.exists() else None,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         self._images_changed()
@@ -4470,9 +4394,12 @@ class MainWindow(QMainWindow):
             return
         dest = game.folder / f"{game.basename}_qrcode.png"
         if dest.exists():
-            resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
-            if resp != QMessageBox.StandardButton.Yes:
-                return
+            if not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                pass
+            else:
+                resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
         try:
             generate_qr_png(url, dest, expected=self._config.qrcode_resolution)
         except Exception as e:

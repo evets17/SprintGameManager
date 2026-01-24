@@ -22,7 +22,7 @@ class ScanResult:
     keyboard_files: list[Path]
 
 
-def scan_folder(folder: Path) -> ScanResult:
+def scan_folder(folder: Path, *, palette_exts: set[str] | None = None) -> ScanResult:
     games: dict[str, GameAssets] = {}
     folders: dict[str, GameAssets] = {}
     palette_files: list[Path] = []
@@ -30,6 +30,8 @@ def scan_folder(folder: Path) -> ScanResult:
 
     if not folder.exists() or not folder.is_dir():
         return ScanResult(folder=folder, games={}, folders={}, palette_files=[], keyboard_files=[])
+
+    pal_exts = {".cfg", ".txt"} if not palette_exts else {e.lower() for e in palette_exts}
 
     def is_hidden_dir(p: Path) -> bool:
         name = p.name
@@ -100,8 +102,8 @@ def scan_folder(folder: Path) -> ScanResult:
             suffix = entry.suffix.lower()
 
             # Track helper files used by Advanced JSON settings.
-            # Palette files: .cfg or .txt containing "palette" anywhere in the filename.
-            if suffix in {".cfg", ".txt"} and "palette" in entry.name.casefold():
+            # Palette files: extension matches PaletteExtensions and name contains "palette".
+            if suffix in pal_exts and "palette" in entry.name.casefold():
                 palette_files.append(entry)
 
             # Keyboard hack files.
