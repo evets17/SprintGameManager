@@ -9,16 +9,21 @@ Desktop GUI for managing Intellivision Sprint Console games (ROM, config, metada
 ```mermaid
 flowchart TB
     subgraph UI["🖥️ PySide6 GUI"]
+        MenuBar["📑 Menu Bar<br/>(Linux)"]
+        Search["🔍 Search/Filter"]
         GameList["📋 Game List Panel"]
         Details["📝 Details Panel"]
         Metadata["✏️ Metadata Editor"]
         ImageCards["🖼️ Image Cards"]
+        StatusBar["📊 Status Bar"]
     end
 
     subgraph Core["⚙️ Core Logic"]
         FileOps["📁 File Operations"]
         Validation["🔍 Resolution Validation"]
         Config["⚡ Config Manager<br/>(sgm.ini)"]
+        Themes["🎨 Theme Engine<br/>(6 themes)"]
+        Duplicates["🔎 Duplicate Detection"]
     end
 
     subgraph Assets["🎮 Game Assets"]
@@ -28,6 +33,8 @@ flowchart TB
         Images["🎨 PNG images<br/>(box, overlay, snap, qr)"]
     end
 
+    MenuBar --> FileOps
+    Search --> GameList
     GameList --> FileOps
     Details --> FileOps
     Metadata --> JSON
@@ -36,19 +43,26 @@ flowchart TB
     FileOps --> ROM
     FileOps --> CFG
     Config --> UI
+    Themes --> UI
+    Duplicates --> GameList
 
     style UI fill:#1e3a5f,stroke:#3b82f6,stroke-width:2px,color:#fff
     style Core fill:#3b1f5f,stroke:#a855f7,stroke-width:2px,color:#fff
     style Assets fill:#1f4f3a,stroke:#22c55e,stroke-width:2px,color:#fff
     
+    style MenuBar fill:#2563eb,stroke:#60a5fa,color:#fff
+    style Search fill:#2563eb,stroke:#60a5fa,color:#fff
     style GameList fill:#2563eb,stroke:#60a5fa,color:#fff
     style Details fill:#2563eb,stroke:#60a5fa,color:#fff
     style Metadata fill:#2563eb,stroke:#60a5fa,color:#fff
     style ImageCards fill:#2563eb,stroke:#60a5fa,color:#fff
+    style StatusBar fill:#2563eb,stroke:#60a5fa,color:#fff
     
     style FileOps fill:#7c3aed,stroke:#a78bfa,color:#fff
     style Validation fill:#7c3aed,stroke:#a78bfa,color:#fff
     style Config fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Themes fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Duplicates fill:#7c3aed,stroke:#a78bfa,color:#fff
     
     style ROM fill:#16a34a,stroke:#4ade80,color:#fff
     style CFG fill:#16a34a,stroke:#4ade80,color:#fff
