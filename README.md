@@ -73,15 +73,78 @@ flowchart TB
 ## New Features
 
 ### Theme Support
-Choose from 6 built-in themes via the dropdown in the top-right corner:
-- **System** - Native OS styling
-- **Dark** - Catppuccin Mocha dark theme
-- **Light** - Catppuccin Latte light theme
-- **Nord** - Arctic blue/teal palette
-- **Dracula** - Purple/pink vampire theme
-- **Gruvbox** - Retro warm brown/orange
+Choose from 6 built-in themes via the dropdown in the top-right corner. Theme selection is saved to your config and persists across sessions.
 
-Theme selection is saved to your config and persists across sessions.
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'fontSize': '14px' }}}%%
+flowchart LR
+    subgraph System
+        S1[" "]
+    end
+    subgraph Dark["Dark (Catppuccin Mocha)"]
+        D1[" "]
+        D2[" "]
+        D3[" "]
+    end
+    subgraph Light["Light (Catppuccin Latte)"]
+        L1[" "]
+        L2[" "]
+        L3[" "]
+    end
+    subgraph Nord["Nord"]
+        N1[" "]
+        N2[" "]
+        N3[" "]
+    end
+    subgraph Dracula["Dracula"]
+        DR1[" "]
+        DR2[" "]
+        DR3[" "]
+    end
+    subgraph Gruvbox["Gruvbox"]
+        G1[" "]
+        G2[" "]
+        G3[" "]
+    end
+
+    style S1 fill:#f0f0f0,stroke:#999,color:#333
+    
+    style D1 fill:#1e1e2e,stroke:#45475a,color:#cdd6f4
+    style D2 fill:#313244,stroke:#45475a,color:#cdd6f4
+    style D3 fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    
+    style L1 fill:#eff1f5,stroke:#ccd0da,color:#4c4f69
+    style L2 fill:#dce0e8,stroke:#ccd0da,color:#4c4f69
+    style L3 fill:#1e66f5,stroke:#1e66f5,color:#fff
+    
+    style N1 fill:#2e3440,stroke:#4c566a,color:#eceff4
+    style N2 fill:#3b4252,stroke:#4c566a,color:#eceff4
+    style N3 fill:#88c0d0,stroke:#88c0d0,color:#2e3440
+    
+    style DR1 fill:#282a36,stroke:#44475a,color:#f8f8f2
+    style DR2 fill:#44475a,stroke:#6272a4,color:#f8f8f2
+    style DR3 fill:#bd93f9,stroke:#bd93f9,color:#282a36
+    
+    style G1 fill:#282828,stroke:#504945,color:#ebdbb2
+    style G2 fill:#3c3836,stroke:#504945,color:#ebdbb2
+    style G3 fill:#fabd2f,stroke:#fabd2f,color:#282828
+
+    style System fill:#f8f8f8,stroke:#ccc,color:#333
+    style Dark fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4
+    style Light fill:#eff1f5,stroke:#1e66f5,color:#4c4f69
+    style Nord fill:#2e3440,stroke:#88c0d0,color:#eceff4
+    style Dracula fill:#282a36,stroke:#bd93f9,color:#f8f8f2
+    style Gruvbox fill:#282828,stroke:#fabd2f,color:#ebdbb2
+```
+
+| Theme | Style | Background | Accent |
+|-------|-------|------------|--------|
+| **System** | Native OS | - | - |
+| **Dark** | Catppuccin Mocha | Deep purple | Blue |
+| **Light** | Catppuccin Latte | Soft gray | Blue |
+| **Nord** | Arctic | Blue-gray | Cyan |
+| **Dracula** | Vampire | Dark purple | Purple |
+| **Gruvbox** | Retro | Brown | Yellow |
 
 ### Search & Filter
 Quickly find games using the search box above the games list:
