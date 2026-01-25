@@ -2298,6 +2298,12 @@ class MainWindow(QMainWindow):
         bulk_json_action.triggered.connect(lambda: self._open_bulk_json_update([]))
         tools_menu.addAction(bulk_json_action)
 
+        tools_menu.addSeparator()
+
+        duplicates_action = QAction("&Find Duplicates...", self)
+        duplicates_action.triggered.connect(self._find_duplicates)
+        tools_menu.addAction(duplicates_action)
+
         # View menu
         view_menu = menubar.addMenu("&View")
 
@@ -2340,6 +2346,103 @@ class MainWindow(QMainWindow):
             f"<p>Desktop GUI for managing Intellivision Sprint Console games.</p>"
             f"<p>Manage ROMs, config, metadata, and images for sideloading.</p>",
         )
+
+    def _find_duplicates(self) -> None:
+        """Find games with similar or duplicate names."""
+        if not self._games:
+            QMessageBox.information(self, "Find Duplicates", "No games loaded.")
+            return
+
+        self._set_status("Searching for duplicates...")
+
+        from difflib import SequenceMatcher
+
+        def normalize(name: str) -> str:
+            """Normalize name for comparison."""
+            import re
+            # Remove common suffixes, parentheses, lowercase
+            n = name.lower()
+            n = re.sub(r'\s*\(.*?\)\s*', '', n)  # Remove (Hack), (Alt 1), etc.
+            n = re.sub(r'[^a-z0-9]', '', n)  # Keep only alphanumeric
+            return n
+
+        def similarity(a: str, b: str) -> float:
+            return SequenceMatcher(None, a, b).ratio()
+
+        games = list(self._games.keys())
+        normalized = {g: normalize(g) for g in games}
+
+        # Find duplicates: exact normalized match or high similarity
+        duplicates: list[tuple[str, str, str]] = []  # (game1, game2, reason)
+        checked: set[tuple[str, str]] = set()
+
+        for i, g1 in enumerate(games):
+            n1 = normalized[g1]
+            for g2 in games[i + 1:]:
+                if (g1, g2) in checked or (g2, g1) in checked:
+                    continue
+                checked.add((g1, g2))
+
+                n2 = normalized[g2]
+
+                # Exact normalized match
+                if n1 == n2 and n1:
+                    duplicates.append((g1, g2, "Same name (ignoring case/symbols)"))
+                    continue
+
+                # High similarity (>85%)
+                sim = similarity(n1, n2)
+                if sim > 0.85:
+                    duplicates.append((g1, g2, f"Similar ({int(sim * 100)}% match)"))
+
+        self._set_status(f"Found {len(duplicates)} potential duplicates")
+
+        if not duplicates:
+            QMessageBox.information(self, "Find Duplicates", "No duplicates or similar games found.")
+            return
+
+        # Show results dialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Potential Duplicates ({len(duplicates)})")
+        dlg.resize(700, 400)
+
+        layout = QVBoxLayout(dlg)
+
+        lbl = QLabel(f"Found {len(duplicates)} potential duplicate pairs:")
+        layout.addWidget(lbl)
+
+        table = QTreeWidget()
+        table.setHeaderLabels(["Game 1", "Game 2", "Reason"])
+        table.setRootIsDecorated(False)
+        table.setAlternatingRowColors(True)
+
+        for g1, g2, reason in duplicates:
+            item = QTreeWidgetItem([g1, g2, reason])
+            table.addTopLevelItem(item)
+
+        table.resizeColumnToContents(0)
+        table.resizeColumnToContents(1)
+        table.resizeColumnToContents(2)
+
+        # Double-click to jump to game
+        def on_double_click(item: QTreeWidgetItem, col: int) -> None:
+            game_name = item.text(0) if col == 0 else item.text(1)
+            if game_name in self._games:
+                self._set_current_in_tree(game_name)
+                dlg.accept()
+
+        table.itemDoubleClicked.connect(on_double_click)
+        layout.addWidget(table)
+
+        hint = QLabel("Double-click a game name to jump to it.")
+        hint.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(hint)
+
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dlg.accept)
+        layout.addWidget(btn_close)
+
+        dlg.exec()
 
     def _open_cfg_clicked(self) -> None:
         try:
