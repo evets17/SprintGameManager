@@ -20,22 +20,25 @@ EOF
 
 echo "Generated $build_py (BUILD=$build_num, GIT_SHA=$git_sha)"
 
-# Prefer venv python if available
-if [ -x "$root/.venv/bin/python" ]; then
-  python="$root/.venv/bin/python"
-else
-  if command -v python3 >/dev/null 2>&1; then
-    python="$(command -v python3)"
-  else
-    python="$(command -v python)"
-  fi
+# Require a virtual environment to avoid PEP 668 issues on modern distros.
+venv_dir="$root/.venv"
+
+if [ ! -x "$venv_dir/bin/python" ]; then
+  echo "Virtual environment not found at $venv_dir"
+  echo "Creating one now..."
+  python3 -m venv "$venv_dir"
+  echo "Installing dependencies..."
+  "$venv_dir/bin/pip" install --upgrade pip
+  "$venv_dir/bin/pip" install -r "$root/requirements.txt"
+  "$venv_dir/bin/pip" install -r "$root/requirements-build.txt"
 fi
 
+python="$venv_dir/bin/python"
 echo "Using python: $python"
 
 # Ensure PyInstaller is available
 if ! "$python" -m pip show pyinstaller >/dev/null 2>&1; then
-  echo "PyInstaller not found in environment; installing..."
+  echo "PyInstaller not found in venv; installing..."
   "$python" -m pip install --upgrade pyinstaller
 fi
 

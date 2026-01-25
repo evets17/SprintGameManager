@@ -47,6 +47,9 @@ class AppConfig:
 
     use_box_image_for_box_small: bool = True
 
+    # UI theme: "system", "dark", "light"
+    theme: str = "system"
+
     # If True: when adding a Big Overlay image, automatically build Overlay 1
     # from it (only if Overlay 1 is currently missing).
     auto_build_overlay: bool = False
@@ -116,6 +119,7 @@ class AppConfig:
             "QrCodeResolution": cfg.qrcode_resolution.to_string(),
             "SnapResolution": cfg.snap_resolution.to_string(),
             "UseBoxImageForBoxSmall": "True" if cfg.use_box_image_for_box_small else "False",
+            "Theme": cfg.theme or "system",
             "AutoBuildOverlay": "True" if cfg.auto_build_overlay else "False",
             "JzIntvMediaPrefix": (cfg.jzintv_media_prefix or "/media/usb0").strip() or "/media/usb0",
             "MetadataEditors": "|".join(editors_clean_sorted),
@@ -249,6 +253,9 @@ class AppConfig:
         cfg.use_box_image_for_box_small = _parse_bool(
             data.get("UseBoxImageForBoxSmall"), default=cfg.use_box_image_for_box_small
         )
+
+        theme = (data.get("Theme", cfg.theme) or "").strip().lower()
+        cfg.theme = theme if theme in {"system", "dark", "light", "nord", "dracula", "gruvbox"} else "system"
 
         cfg.auto_build_overlay = _parse_bool(
             data.get("AutoBuildOverlay"), default=cfg.auto_build_overlay

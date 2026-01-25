@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 import os
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QBrush, QColor, QIcon, QPalette, QDesktopServices
+from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPalette, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -127,6 +127,8 @@ class GamesTreeWidget(QTreeWidget):
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setAutoScroll(True)
         self.setAutoScrollMargin(24)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
     def _set_root_drop_active(self, active: bool) -> None:
         if self._root_drop_active == active:
@@ -404,6 +406,64 @@ class GamesTreeWidget(QTreeWidget):
             event.acceptProposedAction()
         finally:
             self._clear_drop_visuals()
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.itemAt(pos)
+        if item is None:
+            # Right-clicked on empty space - show root folder option
+            if self._root_folder and self._root_folder.exists():
+                from PySide6.QtWidgets import QMenu
+                menu = QMenu(self)
+                open_action = menu.addAction("Open Root Folder in File Manager")
+                action = menu.exec(self.viewport().mapToGlobal(pos))
+                if action == open_action:
+                    self._open_in_file_manager(self._root_folder)
+            return
+
+        info = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(info, dict):
+            return
+
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+
+        folder_path: Path | None = None
+        item_type = info.get("type")
+
+        if item_type == "folder":
+            # It's a folder item
+            path_str = info.get("path")
+            if path_str:
+                folder_path = Path(str(path_str))
+        elif item_type == "game":
+            # It's a game item - get the folder it's in
+            folder_info = info.get("folder")
+            if folder_info:
+                folder_path = Path(str(folder_info))
+            elif self._root_folder:
+                # Game is in root folder
+                folder_path = self._root_folder
+
+        if folder_path and folder_path.exists():
+            open_action = menu.addAction("Open in File Manager")
+            action = menu.exec(self.viewport().mapToGlobal(pos))
+            if action == open_action:
+                self._open_in_file_manager(folder_path)
+
+    def _open_in_file_manager(self, folder: Path) -> None:
+        """Open the given folder in the system file manager."""
+        import subprocess
+        import sys
+
+        try:
+            if sys.platform.startswith("linux"):
+                subprocess.Popen(["xdg-open", str(folder)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(folder)])
+            elif sys.platform == "win32":
+                subprocess.Popen(["explorer", str(folder)])
+        except Exception:
+            pass
 
 
 class FileCard(QWidget):
@@ -1788,10 +1848,11 @@ class MoveGameDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, *, config: AppConfig, config_path: Path):
+    def __init__(self, *, config: AppConfig, config_path: Path, app: QApplication | None = None):
         super().__init__()
         self._config = config
         self._config_path = config_path
+        self._app = app
 
         self._folder: Path | None = None
         self._games: dict[str, GameAssets] = {}
@@ -1815,6 +1876,11 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(main_window_title())
         self.setAcceptDrops(True)
+
+        # Add menu bar on Linux for better desktop integration.
+        import sys
+        if sys.platform.startswith("linux"):
+            self._setup_menu_bar()
 
         root = QWidget()
         root_layout = QVBoxLayout(root)
@@ -1883,6 +1949,17 @@ class MainWindow(QMainWindow):
         self._btn_open_ini.clicked.connect(self._open_ini_clicked)
         top.addWidget(self._btn_open_ini)
 
+        # Theme selector
+        from sgm.ui.theme import THEMES
+        self._cmb_theme = QComboBox()
+        self._cmb_theme.setToolTip("UI Theme")
+        self._cmb_theme.addItems([t.capitalize() for t in THEMES])
+        current_idx = THEMES.index(config.theme) if config.theme in THEMES else 0
+        self._cmb_theme.setCurrentIndex(current_idx)
+        self._cmb_theme.currentIndexChanged.connect(self._on_theme_changed)
+        self._cmb_theme.setFixedWidth(80)
+        top.addWidget(self._cmb_theme)
+
         root_layout.addLayout(top)
 
         # Main split
@@ -1895,6 +1972,16 @@ class MainWindow(QMainWindow):
 
         self._lbl_game_count = QLabel("Games: 0")
         list_l.addWidget(self._lbl_game_count)
+
+        # Search/filter box
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 0, 0)
+        self._search_box = QLineEdit()
+        self._search_box.setPlaceholderText("Search games...")
+        self._search_box.setClearButtonEnabled(True)
+        self._search_box.textChanged.connect(self._on_search_changed)
+        search_row.addWidget(self._search_box)
+        list_l.addLayout(search_row)
 
         self._tree = GamesTreeWidget(parent=self, on_move_games=self._move_games_to_folder, on_add_files=self._add_files_to_folder)
         self._tree.itemSelectionChanged.connect(self._tree_selection_changed)
@@ -1993,9 +2080,66 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(split, 1)
         self.setCentralWidget(root)
 
+        # Status bar
+        from PySide6.QtWidgets import QStatusBar
+        self._status_bar = QStatusBar()
+        self.setStatusBar(self._status_bar)
+        self._status_bar.showMessage("Ready")
+
         self._build_details()
 
         self._init_analyze_filters()
+
+    def _on_search_changed(self, text: str) -> None:
+        """Filter the games tree based on search text."""
+        search = text.strip().lower()
+
+        def filter_item(item: QTreeWidgetItem) -> bool:
+            """Returns True if item or any child matches search."""
+            info = item.data(0, Qt.ItemDataRole.UserRole)
+            item_type = info.get("type") if isinstance(info, dict) else None
+
+            if item_type == "folder":
+                any_child_visible = False
+                for i in range(item.childCount()):
+                    if filter_item(item.child(i)):
+                        any_child_visible = True
+                folder_matches = search in item.text(0).lower()
+                visible = any_child_visible or folder_matches
+                item.setHidden(not visible)
+                if any_child_visible and search:
+                    item.setExpanded(True)
+                return visible
+            else:
+                matches = not search or search in item.text(0).lower()
+                item.setHidden(not matches)
+                return matches
+
+        for i in range(self._tree.topLevelItemCount()):
+            filter_item(self._tree.topLevelItem(i))
+
+        # Update count
+        visible = sum(1 for i in range(self._tree.topLevelItemCount())
+                      for item in self._iter_tree_games(self._tree.topLevelItem(i))
+                      if not item.isHidden())
+        total = len(self._games)
+        if search:
+            self._lbl_game_count.setText(f"Games: {visible}/{total}")
+        else:
+            self._lbl_game_count.setText(f"Games: {total}")
+
+    def _iter_tree_games(self, item: QTreeWidgetItem):
+        """Yield all game items under an item."""
+        info = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(info, dict) and info.get("type") == "game":
+            yield item
+        for i in range(item.childCount()):
+            yield from self._iter_tree_games(item.child(i))
+
+    def _set_status(self, message: str, timeout: int = 0) -> None:
+        """Update status bar message. timeout=0 means permanent until next update."""
+        if hasattr(self, "_status_bar"):
+            self._status_bar.showMessage(message, timeout)
 
     def _tree_selection_changed(self) -> None:
         items = list(self._tree.selectedItems() or []) if hasattr(self, "_tree") else []
@@ -2062,6 +2206,7 @@ class MainWindow(QMainWindow):
     # ---------- public ----------
 
     def load_folder(self, folder: Path) -> None:
+        self._set_status(f"Loading {folder.name}...")
         self._reset_analysis_state()
         self._folder = folder
         self._lbl_folder.setText(str(folder))
@@ -2073,6 +2218,7 @@ class MainWindow(QMainWindow):
             pass
 
         self.refresh()
+        self._set_status(f"Loaded {len(self._games)} games from {folder.name}")
 
     def _refresh_clicked(self) -> None:
         # Manual refresh resets Analyze results; user must Analyze again to filter.
@@ -2088,6 +2234,112 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(ini_path)))
         except Exception as e:
             QMessageBox.warning(self, "Open sgm.ini", str(e))
+
+    def _on_theme_changed(self, index: int) -> None:
+        from sgm.ui.theme import THEMES, get_stylesheet
+        if index < 0 or index >= len(THEMES):
+            return
+        theme = THEMES[index]
+        self._config.theme = theme
+        self._config.save(self._config_path)
+        if self._app is not None:
+            self._app.setStyleSheet(get_stylesheet(theme))
+
+    def _setup_menu_bar(self) -> None:
+        """Create menu bar for Linux desktop integration."""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.addMenu("&File")
+
+        open_action = QAction("&Open Folder...", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self._browse_folder)
+        file_menu.addAction(open_action)
+
+        refresh_action = QAction("&Refresh", self)
+        refresh_action.setShortcut("F5")
+        refresh_action.triggered.connect(self._refresh_clicked)
+        file_menu.addAction(refresh_action)
+
+        file_menu.addSeparator()
+
+        add_files_action = QAction("&Add Files...", self)
+        add_files_action.setShortcut("Ctrl+A")
+        add_files_action.triggered.connect(self._add_files_dialog)
+        file_menu.addAction(add_files_action)
+
+        create_folder_action = QAction("&New Folder...", self)
+        create_folder_action.setShortcut("Ctrl+N")
+        create_folder_action.triggered.connect(self._create_folder_clicked)
+        file_menu.addAction(create_folder_action)
+
+        file_menu.addSeparator()
+
+        open_ini_action = QAction("Open &Config (sgm.ini)...", self)
+        open_ini_action.triggered.connect(self._open_ini_clicked)
+        file_menu.addAction(open_ini_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Tools menu
+        tools_menu = menubar.addMenu("&Tools")
+
+        analyze_action = QAction("&Analyze Games", self)
+        analyze_action.triggered.connect(self._analyze_folder)
+        tools_menu.addAction(analyze_action)
+
+        bulk_json_action = QAction("&JSON Bulk Update...", self)
+        bulk_json_action.triggered.connect(lambda: self._open_bulk_json_update([]))
+        tools_menu.addAction(bulk_json_action)
+
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        from sgm.ui.theme import THEMES
+        theme_menu = view_menu.addMenu("&Theme")
+        for theme in THEMES:
+            action = QAction(theme.capitalize(), self)
+            action.setCheckable(True)
+            action.setChecked(self._config.theme == theme)
+            action.triggered.connect(lambda checked, t=theme: self._set_theme(t))
+            theme_menu.addAction(action)
+
+        # Help menu
+        help_menu = menubar.addMenu("&Help")
+
+        about_action = QAction("&About", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+    def _set_theme(self, theme: str) -> None:
+        from sgm.ui.theme import THEMES, get_stylesheet
+        if theme not in THEMES:
+            return
+        self._config.theme = theme
+        self._config.save(self._config_path)
+        if self._app is not None:
+            self._app.setStyleSheet(get_stylesheet(theme))
+        # Update combo box if present
+        if hasattr(self, "_cmb_theme"):
+            idx = THEMES.index(theme)
+            self._cmb_theme.setCurrentIndex(idx)
+
+    def _show_about(self) -> None:
+        from sgm.version import APP_NAME, version_string
+        QMessageBox.about(
+            self,
+            f"About {APP_NAME}",
+            f"<h3>{APP_NAME}</h3>"
+            f"<p>Version: {version_string()}</p>"
+            f"<p>Desktop GUI for managing Intellivision Sprint Console games.</p>"
+            f"<p>Manage ROMs, config, metadata, and images for sideloading.</p>",
+        )
 
     def _open_cfg_clicked(self) -> None:
         try:

@@ -104,7 +104,11 @@ def main() -> int:
 
     config, config_path = _load_config()
 
-    window = MainWindow(config=config, config_path=config_path)
+    # Apply user-selected theme.
+    from sgm.ui.theme import get_stylesheet
+    app.setStyleSheet(get_stylesheet(config.theme))
+
+    window = MainWindow(config=config, config_path=config_path, app=app)
     if icon_path.exists():
         window.setWindowIcon(QIcon(str(icon_path)))
     window.show()
