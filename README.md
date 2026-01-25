@@ -70,6 +70,50 @@ flowchart TB
     style Images fill:#16a34a,stroke:#4ade80,color:#fff
 ```
 
+## New Features
+
+### Theme Support
+Choose from 6 built-in themes via the dropdown in the top-right corner:
+- **System** - Native OS styling
+- **Dark** - Catppuccin Mocha dark theme
+- **Light** - Catppuccin Latte light theme
+- **Nord** - Arctic blue/teal palette
+- **Dracula** - Purple/pink vampire theme
+- **Gruvbox** - Retro warm brown/orange
+
+Theme selection is saved to your config and persists across sessions.
+
+### Search & Filter
+Quickly find games using the search box above the games list:
+- Real-time filtering as you type
+- Case-insensitive matching
+- Auto-expands folders containing matches
+- Shows filtered count (e.g., "Games: 42/447")
+
+### Duplicate Detection
+Find games with similar or duplicate names via **Tools → Find Duplicates**:
+- Detects exact matches (ignoring case, symbols, and suffixes like "(Hack)")
+- Detects similar names (>85% match)
+- Double-click a result to jump to that game
+
+### Status Bar
+Shows current operation status at the bottom of the window:
+- Loading progress
+- Game counts
+- Operation feedback
+
+### Context Menu
+Right-click on folders or games in the list:
+- **Open in File Manager** - Jump directly to the folder location
+
+### Linux Enhancements
+- **Menu Bar** - Full menu (File, Tools, View, Help) with keyboard shortcuts
+- **XDG Compliance** - Config stored in `~/.config/sgm/`
+- **HiDPI Support** - Auto-scaling for high-resolution displays
+- **Wayland Support** - Native Wayland hints
+- **GTK File Dialogs** - Native file dialogs on GTK desktops
+- **Desktop Integration** - Install script with system-wide option (`-s` flag)
+
 ## Using the app (end users)
 
 ### 1) Pick your games folder

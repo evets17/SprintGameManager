@@ -2428,7 +2428,9 @@ class MainWindow(QMainWindow):
         def on_double_click(item: QTreeWidgetItem, col: int) -> None:
             game_name = item.text(0) if col == 0 else item.text(1)
             if game_name in self._games:
-                self._set_current_in_tree(game_name)
+                # Clear search filter first so item is visible
+                self._search_box.clear()
+                self._set_current_in_tree(game_name, silent=False)
                 dlg.accept()
 
         table.itemDoubleClicked.connect(on_double_click)
