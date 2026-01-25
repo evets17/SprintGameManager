@@ -5,6 +5,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import os
+import subprocess
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPalette, QDesktopServices, QPixmap
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
@@ -822,6 +824,10 @@ class MetadataEditor(QWidget):
             self._desc_tabs.setCurrentIndex(0)
         fields_l.addWidget(self._desc_tabs, 1)
 
+        self._lbl_desc_count = QLabel("Character Count: 0")
+        self._lbl_desc_count.setToolTip("Shows the character count for the currently selected description field (whitespace-only counts as 0).")
+        fields_l.addWidget(self._lbl_desc_count)
+
         adv_row = QHBoxLayout()
         adv_row.setContentsMargins(0, 0, 0, 0)
         self._btn_advanced = QPushButton("Advanced")
@@ -860,6 +866,9 @@ class MetadataEditor(QWidget):
         self._editor.currentTextChanged.connect(self._mark_dirty)
         for edit in self._desc_edits.values():
             edit.textChanged.connect(self._mark_dirty)
+            edit.textChanged.connect(self._update_desc_count)
+
+        self._desc_tabs.currentChanged.connect(lambda *_: self._update_desc_count())
 
         # Keep required-field label styling in sync as the user edits.
         self._name.textChanged.connect(lambda *_: self._update_required_label_styles())
@@ -870,6 +879,7 @@ class MetadataEditor(QWidget):
             edit.textChanged.connect(lambda *_: self._update_required_label_styles())
 
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def _set_label_missing(self, label: QWidget | None, missing: bool) -> None:
         if label is None:
@@ -909,6 +919,19 @@ class MetadataEditor(QWidget):
         self._set_label_missing(self._form.labelForField(self._editor), editor_missing)
         self._set_label_missing(self._form.labelForField(self._year), year_missing)
         self._set_label_missing(getattr(self, "_lbl_desc", None), desc_missing)
+
+    def _update_desc_count(self) -> None:
+        try:
+            idx = int(self._desc_tabs.currentIndex())
+        except Exception:
+            idx = 0
+        if idx < 0 or idx >= len(self.LANGS):
+            idx = 0
+        lang = self.LANGS[idx]
+        edit = self._desc_edits.get(lang)
+        text = edit.toPlainText() if edit else ""
+        count = len(text) if text.strip() else 0
+        self._lbl_desc_count.setText(f"Character Count: {count}")
 
     def set_preferred_language(self, lang: str, *, set_tab: bool = True) -> None:
         pref = (lang or "en").strip().lower() or "en"
@@ -957,6 +980,7 @@ class MetadataEditor(QWidget):
             self._fields.setVisible(False)
             self._bottom_spacer.setVisible(True)
             self._update_required_label_styles()
+            self._update_desc_count()
             return
 
         if path is None or not path.exists():
@@ -969,6 +993,7 @@ class MetadataEditor(QWidget):
             self._fields.setVisible(False)
             self._bottom_spacer.setVisible(True)
             self._update_required_label_styles()
+            self._update_desc_count()
             return
 
         self._warning.setText("")
@@ -982,6 +1007,7 @@ class MetadataEditor(QWidget):
             self._btn_advanced.setEnabled(True)
         self._load(path)
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def set_bulk_context(self, game_ids: list[str]) -> None:
         # Multi-select: hide per-game controls; bulk updater is launched from the main window.
@@ -1140,6 +1166,7 @@ class MetadataEditor(QWidget):
         for lang, edit in self._desc_edits.items():
             edit.setPlainText("")
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def _load(self, path: Path) -> None:
         try:
@@ -1197,6 +1224,7 @@ class MetadataEditor(QWidget):
         self._dirty = False
         self._btn_action.setEnabled(False)
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def _action_clicked(self) -> None:
         if not self._folder or not self._basename:
@@ -1222,6 +1250,7 @@ class MetadataEditor(QWidget):
         else:
             self._dirty = False
             self._btn_action.setEnabled(False)
+        self._update_desc_count()
 
     def _create(self) -> None:
         if not self._folder or not self._basename:
@@ -1917,6 +1946,8 @@ class MainWindow(QMainWindow):
 
         self._tree = GamesTreeWidget(parent=self, on_move_games=self._move_games_to_folder, on_add_files=self._add_files_to_folder)
         self._tree.itemSelectionChanged.connect(self._tree_selection_changed)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._show_tree_context_menu)
         list_l.addWidget(self._tree, 1)
 
         analyze = QFrame()
@@ -2107,6 +2138,82 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(ini_path)))
         except Exception as e:
             QMessageBox.warning(self, "Open sgm.ini", str(e))
+
+    def _show_tree_context_menu(self, pos) -> None:
+        item = self._tree.itemAt(pos)
+        if item is None:
+            return
+        info = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(info, dict):
+            return
+        path_str = None
+        game_id = None
+        if info.get("type") == "folder":
+            path_str = info.get("path")
+        elif info.get("type") == "game":
+            path_str = info.get("folder")
+            game_id = info.get("id")
+
+        if not path_str:
+            return
+
+        menu = QMenu(self)
+        act_reveal = menu.addAction("Reveal In Explorer")
+        action = menu.exec(self._tree.viewport().mapToGlobal(pos))
+        if action is act_reveal:
+            if game_id:
+                self._reveal_game_file(game_id, fallback=Path(path_str))
+            else:
+                self._reveal_in_explorer(Path(path_str))
+
+    def _reveal_game_file(self, game_id: str, *, fallback: Path) -> None:
+        try:
+            game = self._games.get(game_id)
+        except Exception:
+            game = None
+        target = self._first_game_file(game)
+        if target is None:
+            self._reveal_in_explorer(fallback)
+        else:
+            self._reveal_in_explorer(target)
+
+    def _first_game_file(self, game) -> Path | None:
+        if game is None:
+            return None
+        candidates = [
+            game.rom,
+            game.config,
+            game.metadata,
+            game.box,
+            game.box_small,
+            game.overlay,
+            game.overlay2,
+            game.overlay3,
+            game.overlay_big,
+            game.qrcode,
+            game.snap1,
+            game.snap2,
+            game.snap3,
+        ]
+        for p in candidates:
+            if p is not None and p.exists():
+                return p
+        return None
+
+    def _reveal_in_explorer(self, path: Path) -> None:
+        try:
+            target = path
+            if target.is_file():
+                if os.name == "nt":
+                    subprocess.run(["explorer", "/select,", str(target)], check=False)
+                    return
+                target = target.parent
+            if not target.exists():
+                QMessageBox.warning(self, "Reveal In Explorer", f"Path not found:\n{target}")
+                return
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+        except Exception as e:
+            QMessageBox.warning(self, "Reveal In Explorer", str(e))
 
     def _open_settings_clicked(self) -> None:
         dlg = SettingsDialog(
