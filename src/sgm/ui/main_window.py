@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import os
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPalette, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -1892,43 +1893,58 @@ class MainWindow(QMainWindow):
         btn_size = QSize(28, 28)
         icon_size = QSize(18, 18)
 
+        # Try to use custom icons, fall back to system icons
+        try:
+            from sgm.ui.icons import get_icon
+            use_custom_icons = True
+        except ImportError:
+            use_custom_icons = False
+
         self._btn_browse = QToolButton()
-        self._btn_browse.setToolTip("Browse games folder")
+        self._btn_browse.setToolTip("Browse games folder (Ctrl+O)")
         self._btn_browse.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._btn_browse.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        if use_custom_icons:
+            self._btn_browse.setIcon(get_icon("folder_open"))
+        else:
+            self._btn_browse.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
         self._btn_browse.setFixedSize(btn_size)
         self._btn_browse.setIconSize(icon_size)
-        self._btn_browse.setStyleSheet("QToolButton { padding: 0px; }")
         self._btn_browse.clicked.connect(self._browse_folder)
         top.addWidget(self._btn_browse)
 
         self._btn_refresh = QToolButton()
-        self._btn_refresh.setToolTip("Refresh games list")
+        self._btn_refresh.setToolTip("Refresh games list (F5)")
         self._btn_refresh.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._btn_refresh.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        if use_custom_icons:
+            self._btn_refresh.setIcon(get_icon("refresh"))
+        else:
+            self._btn_refresh.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
         self._btn_refresh.setFixedSize(btn_size)
         self._btn_refresh.setIconSize(icon_size)
-        self._btn_refresh.setStyleSheet("QToolButton { padding: 0px; }")
         self._btn_refresh.clicked.connect(self._refresh_clicked)
         top.addWidget(self._btn_refresh)
 
         self._btn_add_files = QToolButton()
         self._btn_add_files.setToolTip("Add files to selected folder")
         self._btn_add_files.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._btn_add_files.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+        if use_custom_icons:
+            self._btn_add_files.setIcon(get_icon("file_plus"))
+        else:
+            self._btn_add_files.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
         self._btn_add_files.setFixedSize(btn_size)
         self._btn_add_files.setIconSize(icon_size)
-        self._btn_add_files.setStyleSheet("QToolButton { padding: 0px; }")
         self._btn_add_files.clicked.connect(self._add_files_dialog)
         top.addWidget(self._btn_add_files)
 
         self._btn_create_folder = QToolButton()
         self._btn_create_folder.setToolTip("Create folder under selection")
         self._btn_create_folder.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._btn_create_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+        if use_custom_icons:
+            self._btn_create_folder.setIcon(get_icon("folder_plus"))
+        else:
+            self._btn_create_folder.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
         self._btn_create_folder.setFixedSize(btn_size)
         self._btn_create_folder.setIconSize(icon_size)
-        self._btn_create_folder.setStyleSheet("QToolButton { padding: 0px; }")
         self._btn_create_folder.clicked.connect(self._create_folder_clicked)
         top.addWidget(self._btn_create_folder)
         top.addStretch(1)
@@ -1942,10 +1958,12 @@ class MainWindow(QMainWindow):
         self._btn_open_ini = QToolButton()
         self._btn_open_ini.setToolTip("Open sgm.ini in default editor")
         self._btn_open_ini.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._btn_open_ini.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
+        if use_custom_icons:
+            self._btn_open_ini.setIcon(get_icon("settings"))
+        else:
+            self._btn_open_ini.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
         self._btn_open_ini.setFixedSize(btn_size)
         self._btn_open_ini.setIconSize(icon_size)
-        self._btn_open_ini.setStyleSheet("QToolButton { padding: 0px; }")
         self._btn_open_ini.clicked.connect(self._open_ini_clicked)
         top.addWidget(self._btn_open_ini)
 
@@ -1974,6 +1992,7 @@ class MainWindow(QMainWindow):
         list_l.addWidget(self._lbl_game_count)
 
         # Search/filter box
+        # Search and sort row
         search_row = QHBoxLayout()
         search_row.setContentsMargins(0, 0, 0, 0)
         self._search_box = QLineEdit()
@@ -1981,6 +2000,14 @@ class MainWindow(QMainWindow):
         self._search_box.setClearButtonEnabled(True)
         self._search_box.textChanged.connect(self._on_search_changed)
         search_row.addWidget(self._search_box)
+
+        self._sort_combo = QComboBox()
+        self._sort_combo.setToolTip("Sort games")
+        self._sort_combo.addItems(["Name ↑", "Name ↓", "Warnings ↓", "Warnings ↑"])
+        self._sort_combo.setFixedWidth(95)
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        search_row.addWidget(self._sort_combo)
+
         list_l.addLayout(search_row)
 
         self._tree = GamesTreeWidget(parent=self, on_move_games=self._move_games_to_folder, on_add_files=self._add_files_to_folder)
@@ -2136,6 +2163,30 @@ class MainWindow(QMainWindow):
         for i in range(item.childCount()):
             yield from self._iter_tree_games(item.child(i))
 
+    def _on_sort_changed(self, index: int) -> None:
+        """Handle sort option change."""
+        self._current_sort = index
+        self.refresh()
+
+    def _get_sorted_games(self) -> list[str]:
+        """Return game names sorted according to current sort option."""
+        games = list(self._games.keys())
+        sort_idx = getattr(self, "_current_sort", 0)
+
+        if sort_idx == 0:  # Name ascending
+            return sorted(games, key=lambda x: x.lower())
+        elif sort_idx == 1:  # Name descending
+            return sorted(games, key=lambda x: x.lower(), reverse=True)
+        elif sort_idx == 2:  # Warnings descending
+            def warning_count(name: str) -> int:
+                return len(self._analysis_by_game.get(name, set()))
+            return sorted(games, key=lambda x: (warning_count(x), x.lower()), reverse=True)
+        elif sort_idx == 3:  # Warnings ascending
+            def warning_count(name: str) -> int:
+                return len(self._analysis_by_game.get(name, set()))
+            return sorted(games, key=lambda x: (warning_count(x), x.lower()))
+        return games
+
     def _set_status(self, message: str, timeout: int = 0) -> None:
         """Update status bar message. timeout=0 means permanent until next update."""
         if hasattr(self, "_status_bar"):
@@ -2217,6 +2268,12 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # Switch from welcome screen to content
+        if hasattr(self, "_welcome_widget"):
+            self._welcome_widget.setVisible(False)
+        if hasattr(self, "_details_content"):
+            self._details_content.setVisible(True)
+
         self.refresh()
         self._set_status(f"Loaded {len(self._games)} games from {folder.name}")
 
@@ -2243,7 +2300,45 @@ class MainWindow(QMainWindow):
         self._config.theme = theme
         self._config.save(self._config_path)
         if self._app is not None:
-            self._app.setStyleSheet(get_stylesheet(theme))
+            self._animate_theme_change(get_stylesheet(theme))
+
+    def _animate_theme_change(self, new_stylesheet: str) -> None:
+        """Animate theme transition with a fade effect."""
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+        # Create opacity effect for fade
+        effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(effect)
+
+        # Fade out
+        fade_out = QPropertyAnimation(effect, b"opacity")
+        fade_out.setDuration(150)
+        fade_out.setStartValue(1.0)
+        fade_out.setEndValue(0.7)
+        fade_out.setEasingCurve(QEasingCurve.Type.OutQuad)
+
+        def apply_and_fade_in():
+            if self._app:
+                self._app.setStyleSheet(new_stylesheet)
+            # Fade in
+            fade_in = QPropertyAnimation(effect, b"opacity")
+            fade_in.setDuration(150)
+            fade_in.setStartValue(0.7)
+            fade_in.setEndValue(1.0)
+            fade_in.setEasingCurve(QEasingCurve.Type.InQuad)
+
+            def cleanup():
+                self.setGraphicsEffect(None)
+
+            fade_in.finished.connect(cleanup)
+            fade_in.start()
+            # Keep reference to prevent garbage collection
+            self._fade_in_anim = fade_in
+
+        fade_out.finished.connect(apply_and_fade_in)
+        fade_out.start()
+        # Keep reference to prevent garbage collection
+        self._fade_out_anim = fade_out
 
     def _setup_menu_bar(self) -> None:
         """Create menu bar for Linux desktop integration."""
@@ -2330,11 +2425,14 @@ class MainWindow(QMainWindow):
         self._config.theme = theme
         self._config.save(self._config_path)
         if self._app is not None:
-            self._app.setStyleSheet(get_stylesheet(theme))
+            self._animate_theme_change(get_stylesheet(theme))
         # Update combo box if present
         if hasattr(self, "_cmb_theme"):
             idx = THEMES.index(theme)
+            from PySide6.QtCore import QSignalBlocker
+            blocker = QSignalBlocker(self._cmb_theme)
             self._cmb_theme.setCurrentIndex(idx)
+            _ = blocker
 
     def _show_about(self) -> None:
         from sgm.version import APP_NAME, version_string
@@ -3376,8 +3474,12 @@ class MainWindow(QMainWindow):
 
         self._has_any_folders = bool(folder_items)
 
-        # Add games under their folder nodes
-        for game_id, game in self._games.items():
+        # Add games under their folder nodes (sorted)
+        sorted_game_ids = self._get_sorted_games()
+        for game_id in sorted_game_ids:
+            game = self._games.get(game_id)
+            if not game:
+                continue
             codes = self._analysis_by_game.get(game_id, set()) if self._analysis_enabled else set()
             if self._analysis_enabled and enabled_codes:
                 codes = {c for c in codes if c in enabled_codes}
@@ -3641,6 +3743,49 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(self._detail_root)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # Welcome screen (shown when no folder loaded)
+        self._welcome_widget = QWidget()
+        welcome_l = QVBoxLayout(self._welcome_widget)
+        welcome_l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        welcome_title = QLabel("🎮 Sprint Game Manager")
+        welcome_title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        welcome_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome_l.addWidget(welcome_title)
+
+        welcome_subtitle = QLabel("Manage your Intellivision Sprint Console games")
+        welcome_subtitle.setStyleSheet("font-size: 14px; color: gray;")
+        welcome_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome_l.addWidget(welcome_subtitle)
+
+        welcome_l.addSpacing(30)
+
+        tips_title = QLabel("Getting Started")
+        tips_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        tips_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome_l.addWidget(tips_title)
+
+        tips = QLabel(
+            "📂  <b>Open a folder</b> — Click the folder icon or press <code>Ctrl+O</code><br><br>"
+            "🔍  <b>Search games</b> — Use the search box to filter by name<br><br>"
+            "📊  <b>Analyze</b> — Run analysis to find missing assets<br><br>"
+            "🎨  <b>Themes</b> — Choose a theme from the dropdown<br><br>"
+            "🔎  <b>Find duplicates</b> — Tools → Find Duplicates"
+        )
+        tips.setStyleSheet("font-size: 13px; line-height: 1.6;")
+        tips.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        tips.setTextFormat(Qt.TextFormat.RichText)
+        welcome_l.addWidget(tips, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        welcome_l.addSpacing(30)
+
+        btn_open = QPushButton("📂  Open Games Folder")
+        btn_open.setFixedWidth(200)
+        btn_open.clicked.connect(self._browse_folder)
+        welcome_l.addWidget(btn_open, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(self._welcome_widget)
+
         # Left: ROM/CFG thin rows at top + images underneath
         left = QWidget()
         left_l = QVBoxLayout(left)
@@ -3868,7 +4013,13 @@ class MainWindow(QMainWindow):
         details_split.addWidget(right)
         details_split.setStretchFactor(0, 2)
         details_split.setStretchFactor(1, 1)
+
+        self._details_content = details_split
         layout.addWidget(details_split, 1)
+
+        # Initially show welcome, hide content
+        self._details_content.setVisible(False)
+        self._welcome_widget.setVisible(True)
 
     # ---------- selection ----------
 
