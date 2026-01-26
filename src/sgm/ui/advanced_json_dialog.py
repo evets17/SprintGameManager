@@ -391,13 +391,23 @@ class AdvancedJsonDialog(QDialog):
         if kbd_val is not None:
             local = _device_to_local_path(root=self._root, device_path=kbd_val, media_prefix=self._media_prefix)
             if local is None or not local.exists():
-                self._lbl_kbd_missing.setText(f"Warning: referenced keyboard file does not exist: {kbd_val}")
+                expected = str(local) if local is not None else "(unable to map to local path)"
+                self._lbl_kbd_missing.setText(
+                    "Warning: referenced keyboard file does not exist.\n"
+                    f"jzintv_extra: {kbd_val}\n"
+                    f"Resolved local path: {expected}"
+                )
                 self._lbl_kbd_missing.setVisible(True)
 
         if pal_val is not None:
             local = _device_to_local_path(root=self._root, device_path=pal_val, media_prefix=self._media_prefix)
             if local is None or not local.exists():
-                self._lbl_palette_missing.setText(f"Warning: referenced palette file does not exist: {pal_val}")
+                expected = str(local) if local is not None else "(unable to map to local path)"
+                self._lbl_palette_missing.setText(
+                    "Warning: referenced palette file does not exist.\n"
+                    f"jzintv_extra: {pal_val}\n"
+                    f"Resolved local path: {expected}"
+                )
                 self._lbl_palette_missing.setVisible(True)
 
     def _update_flag_buttons(self) -> None:
@@ -486,6 +496,9 @@ class AdvancedJsonDialog(QDialog):
         tokens: list[str] = []
         tokens.extend(other_flags)
 
+        self._warn_if_not_under_root(kbd, label="Keyboard Hack File")
+        self._warn_if_not_under_root(palette, label="Color Palette")
+
         if kbd is not None:
             tokens.append(
                 f"--kbdhackfile={_local_to_device_path(root=self._root, local_path=kbd, media_prefix=self._media_prefix)}"
@@ -509,6 +522,24 @@ class AdvancedJsonDialog(QDialog):
 
         self._write()
         self._sync_from_json()
+
+    def _warn_if_not_under_root(self, path: Path | None, *, label: str) -> None:
+        if path is None:
+            return
+        try:
+            _ = path.relative_to(self._root)
+            return
+        except Exception:
+            pass
+
+        msg = (
+            f"{label} was selected from a location outside the games root folder.\n\n"
+            f"Selected file:\n{path}\n\n"
+            f"Games root:\n{self._root}\n\n"
+            "Because it is outside the root, the jzintv_extra path will only use the filename\n"
+            "(no subfolder), which may not round-trip when reopening this dialog."
+        )
+        QMessageBox.information(self, "Advanced Settings", msg)
 
     def _kbd_changed(self) -> None:
         idx = self._cmb_kbd.currentIndex()

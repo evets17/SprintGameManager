@@ -54,9 +54,16 @@ class AppConfig:
     # from it (only if Overlay 1 is currently missing).
     auto_build_overlay: bool = False
 
+    # If True: show confirmation dialogs before overwriting images.
+    confirm_image_overwrite: bool = True
+
     # Used when building jzintv flags that reference files on the target device.
     # Example output: --kbdhackfile="<prefix>/<relative_path>"
     jzintv_media_prefix: str = "/media/usb0"
+
+    # Extensions used when detecting palette helper files.
+    # Example: ".txt|.cfg|.pal"
+    palette_extensions: list[str] = None  # populated in defaults()
 
     metadata_editors: list[str] = None  # populated in defaults()
 
@@ -87,13 +94,13 @@ class AppConfig:
             "jzintv_extra",
             "save_highscores",
         ]
+        cfg.palette_extensions = _normalize_extensions([".txt", ".cfg"])
         return cfg
 
     @staticmethod
     def _to_ini_kv(cfg: "AppConfig") -> dict[str, str]:
         editors = cfg.metadata_editors or []
         editors_clean = [str(e).strip() for e in editors if str(e).strip()]
-        editors_clean_sorted = sorted(editors_clean, key=lambda s: s.casefold())
 
         json_keys = cfg.json_keys or []
         json_keys_clean: list[str] = []
@@ -121,8 +128,10 @@ class AppConfig:
             "UseBoxImageForBoxSmall": "True" if cfg.use_box_image_for_box_small else "False",
             "Theme": cfg.theme or "system",
             "AutoBuildOverlay": "True" if cfg.auto_build_overlay else "False",
+            "ConfirmImageOverwrite": "True" if cfg.confirm_image_overwrite else "False",
             "JzIntvMediaPrefix": (cfg.jzintv_media_prefix or "/media/usb0").strip() or "/media/usb0",
-            "MetadataEditors": "|".join(editors_clean_sorted),
+            "PaletteExtensions": "|".join(_normalize_extensions(cfg.palette_extensions or [])),
+            "MetadataEditors": "|".join(editors_clean),
             "JsonKeys": "|".join(json_keys_clean),
         }
 
@@ -261,7 +270,15 @@ class AppConfig:
             data.get("AutoBuildOverlay"), default=cfg.auto_build_overlay
         )
 
+        cfg.confirm_image_overwrite = _parse_bool(
+            data.get("ConfirmImageOverwrite"), default=cfg.confirm_image_overwrite
+        )
+
         cfg.jzintv_media_prefix = (data.get("JzIntvMediaPrefix", cfg.jzintv_media_prefix) or "").strip() or "/media/usb0"
+
+        cfg.palette_extensions = _normalize_extensions(
+            _parse_string_list(data.get("PaletteExtensions"), default=cfg.palette_extensions)
+        )
 
         cfg.metadata_editors = _parse_string_list(
             data.get("MetadataEditors"),
@@ -311,8 +328,6 @@ def _parse_position(value: str | None, *, default: tuple[int, int]) -> tuple[int
         a, b = raw.split(",", 1)
         x = int(a)
         y = int(b)
-        if x < 0 or y < 0:
-            return default
         return (x, y)
     except Exception:
         return default
@@ -333,6 +348,19 @@ def _parse_string_list(value: str | None, *, default: list[str]) -> list[str]:
         s = p.strip()
         if not s:
             continue
+        if s not in out:
+            out.append(s)
+    return out
+
+
+def _normalize_extensions(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for v in values:
+        s = (v or "").strip().lower()
+        if not s:
+            continue
+        if not s.startswith("."):
+            s = "." + s
         if s not in out:
             out.append(s)
     return out

@@ -323,6 +323,8 @@ class ImageCard(QFrame):
     def _confirm_replace_if_needed(self, dest: Path) -> bool:
         if not dest.exists():
             return True
+        if not bool(getattr(self._config, "confirm_image_overwrite", True)):
+            return True
         resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
         return resp == QMessageBox.StandardButton.Yes
 
