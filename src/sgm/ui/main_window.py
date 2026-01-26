@@ -5,9 +5,10 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import os
+import subprocess
 
 from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QBrush, QColor, QIcon, QPalette, QDesktopServices
+from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPalette, QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
@@ -51,11 +53,9 @@ from sgm.config import AppConfig
 from sgm.domain import GameAssets
 from sgm.image_ops import (
     ImageProcessError,
-    build_overlay_png,
     build_overlay_png_from_file,
     generate_qr_png,
     get_image_size,
-    pil_from_qimage,
     save_png_resized_from_file,
 )
 from sgm.resources import resource_path, resources_dir
@@ -72,6 +72,8 @@ from sgm.scanner import _classify, scan_folder
 from sgm.ui.advanced_json_dialog import AdvancedJsonDialog
 from sgm.ui.bulk_json_update_dialog import BulkJsonUpdateDialog
 from sgm.ui.overlay_cleaner_dialog import OverlayImageCleanerDialog
+from sgm.ui.overlay_builder_dialog import OverlayBuilderDialog
+from sgm.ui.settings_dialog import SettingsDialog
 from sgm.ui.widgets import ImageCard, ImageSpec, OverlayCard, OverlayPrimaryCard, SnapshotCard
 from sgm.ui.dialog_state import get_start_dir, remember_path
 from sgm.version import main_window_title
@@ -79,6 +81,7 @@ from sgm.sprint_fs import sprint_name_key, sprint_path_key
 
 
 ACCEPTED_ADD_EXTS = {".bin", ".int", ".rom", ".cfg", ".json", ".png"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 
 
 def _is_hidden_dir(p: Path) -> bool:
@@ -97,6 +100,54 @@ def _is_hidden_dir(p: Path) -> bool:
         except Exception:
             return False
     return False
+
+
+def _icon_from_svg(path: Path) -> QIcon:
+    try:
+        from PySide6.QtSvg import QSvgRenderer
+
+        renderer = QSvgRenderer(str(path))
+        if not renderer.isValid():
+            return QIcon(str(path))
+
+        size = renderer.defaultSize()
+        w = size.width() if size.width() > 0 else 64
+        h = size.height() if size.height() > 0 else 64
+        pix = QPixmap(w, h)
+        pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pix)
+        renderer.render(painter)
+        painter.end()
+        return QIcon(pix)
+    except Exception:
+        return QIcon(str(path))
+
+
+def _parse_overlay_template_override(raw: str) -> list[Path]:
+    value = (raw or "").strip()
+    if not value:
+        return []
+    parts = value.split("|") if "|" in value else value.split(",")
+    out: list[Path] = []
+    seen: set[str] = set()
+    for p in parts:
+        s = p.strip()
+        if not s:
+            continue
+        try:
+            path = Path(s).expanduser()
+        except Exception:
+            path = Path(s)
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+
+def _is_image_path(p: Path) -> bool:
+    return p.suffix.lower() in IMAGE_EXTS
 
 
 class GamesTreeWidget(QTreeWidget):
@@ -773,6 +824,10 @@ class MetadataEditor(QWidget):
             self._desc_tabs.setCurrentIndex(0)
         fields_l.addWidget(self._desc_tabs, 1)
 
+        self._lbl_desc_count = QLabel("Character Count: 0")
+        self._lbl_desc_count.setToolTip("Shows the character count for the currently selected description field (whitespace-only counts as 0).")
+        fields_l.addWidget(self._lbl_desc_count)
+
         adv_row = QHBoxLayout()
         adv_row.setContentsMargins(0, 0, 0, 0)
         self._btn_advanced = QPushButton("Advanced")
@@ -811,6 +866,9 @@ class MetadataEditor(QWidget):
         self._editor.currentTextChanged.connect(self._mark_dirty)
         for edit in self._desc_edits.values():
             edit.textChanged.connect(self._mark_dirty)
+            edit.textChanged.connect(self._update_desc_count)
+
+        self._desc_tabs.currentChanged.connect(lambda *_: self._update_desc_count())
 
         # Keep required-field label styling in sync as the user edits.
         self._name.textChanged.connect(lambda *_: self._update_required_label_styles())
@@ -821,6 +879,7 @@ class MetadataEditor(QWidget):
             edit.textChanged.connect(lambda *_: self._update_required_label_styles())
 
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def _set_label_missing(self, label: QWidget | None, missing: bool) -> None:
         if label is None:
@@ -861,6 +920,41 @@ class MetadataEditor(QWidget):
         self._set_label_missing(self._form.labelForField(self._year), year_missing)
         self._set_label_missing(getattr(self, "_lbl_desc", None), desc_missing)
 
+    def _update_desc_count(self) -> None:
+        try:
+            idx = int(self._desc_tabs.currentIndex())
+        except Exception:
+            idx = 0
+        if idx < 0 or idx >= len(self.LANGS):
+            idx = 0
+        lang = self.LANGS[idx]
+        edit = self._desc_edits.get(lang)
+        text = edit.toPlainText() if edit else ""
+        count = len(text) if text.strip() else 0
+        self._lbl_desc_count.setText(f"Character Count: {count}")
+
+    def set_preferred_language(self, lang: str, *, set_tab: bool = True) -> None:
+        pref = (lang or "en").strip().lower() or "en"
+        if pref not in self.LANGS:
+            pref = "en"
+        self._preferred_language = pref
+        if set_tab:
+            try:
+                self._desc_tabs.setCurrentIndex(self.LANGS.index(self._preferred_language))
+            except Exception:
+                pass
+        self._update_required_label_styles()
+
+    def set_metadata_editors(self, editors: list[str]) -> None:
+        self._metadata_editors = list(editors or [])
+        current = (self._editor.currentText() or "").strip()
+        self._editor.blockSignals(True)
+        self._editor.clear()
+        if self._metadata_editors:
+            self._editor.addItems(self._metadata_editors)
+        self._editor.setEditText(current)
+        self._editor.blockSignals(False)
+
     def set_context(
         self,
         *,
@@ -886,6 +980,7 @@ class MetadataEditor(QWidget):
             self._fields.setVisible(False)
             self._bottom_spacer.setVisible(True)
             self._update_required_label_styles()
+            self._update_desc_count()
             return
 
         if path is None or not path.exists():
@@ -898,6 +993,7 @@ class MetadataEditor(QWidget):
             self._fields.setVisible(False)
             self._bottom_spacer.setVisible(True)
             self._update_required_label_styles()
+            self._update_desc_count()
             return
 
         self._warning.setText("")
@@ -911,6 +1007,7 @@ class MetadataEditor(QWidget):
             self._btn_advanced.setEnabled(True)
         self._load(path)
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def set_bulk_context(self, game_ids: list[str]) -> None:
         # Multi-select: hide per-game controls; bulk updater is launched from the main window.
@@ -1069,6 +1166,7 @@ class MetadataEditor(QWidget):
         for lang, edit in self._desc_edits.items():
             edit.setPlainText("")
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def _load(self, path: Path) -> None:
         try:
@@ -1126,6 +1224,7 @@ class MetadataEditor(QWidget):
         self._dirty = False
         self._btn_action.setEnabled(False)
         self._update_required_label_styles()
+        self._update_desc_count()
 
     def _action_clicked(self) -> None:
         if not self._folder or not self._basename:
@@ -1151,6 +1250,7 @@ class MetadataEditor(QWidget):
         else:
             self._dirty = False
             self._btn_action.setEnabled(False)
+        self._update_desc_count()
 
     def _create(self) -> None:
         if not self._folder or not self._basename:
@@ -1262,58 +1362,6 @@ class SnapshotsRow(QWidget):
 
     def on_snapshot_drop(self, src_index: int, dst_index: int) -> None:
         self._on_reorder(src_index, dst_index)
-
-
-class OverlayBuildDialog(QDialog):
-    def __init__(self, *, parent: QWidget, can_use_big_overlay: bool):
-        super().__init__(parent)
-        self.choice: str | None = None
-        self.setWindowTitle("Build Overlay")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(6)
-        try:
-            layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        except Exception:
-            pass
-
-        layout.addWidget(QLabel("Choose source for the bottom image:"))
-
-        row = QHBoxLayout()
-        btn_browse = QPushButton("Browse")
-        btn_paste = QPushButton("Paste")
-        btn_big = QPushButton("Use Big Overlay")
-        btn_big.setEnabled(can_use_big_overlay)
-
-        btn_browse.clicked.connect(self._choose_browse)
-        btn_paste.clicked.connect(self._choose_paste)
-        btn_big.clicked.connect(self._choose_big)
-
-        row.addWidget(btn_browse)
-        row.addWidget(btn_paste)
-        row.addWidget(btn_big)
-        row.addStretch(1)
-        layout.addLayout(row)
-
-        cancel_row = QHBoxLayout()
-        cancel_row.addStretch(1)
-        btn_cancel = QPushButton("Cancel")
-        btn_cancel.clicked.connect(self.reject)
-        cancel_row.addWidget(btn_cancel)
-        layout.addLayout(cancel_row)
-
-    def _choose_browse(self) -> None:
-        self.choice = "browse"
-        self.accept()
-
-    def _choose_paste(self) -> None:
-        self.choice = "paste"
-        self.accept()
-
-    def _choose_big(self) -> None:
-        self.choice = "big"
-        self.accept()
 
 
 class QrUrlDialog(QDialog):
@@ -1873,15 +1921,15 @@ class MainWindow(QMainWindow):
         self._lbl_warnings = QLabel("Warnings: 0")
         top.addWidget(self._lbl_warnings)
 
-        self._btn_open_ini = QToolButton()
-        self._btn_open_ini.setToolTip("Open sgm.ini in default editor")
-        self._btn_open_ini.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._btn_open_ini.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        self._btn_open_ini.setFixedSize(btn_size)
-        self._btn_open_ini.setIconSize(icon_size)
-        self._btn_open_ini.setStyleSheet("QToolButton { padding: 0px; }")
-        self._btn_open_ini.clicked.connect(self._open_ini_clicked)
-        top.addWidget(self._btn_open_ini)
+        self._btn_settings = QToolButton()
+        self._btn_settings.setToolTip("Settings")
+        self._btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self._btn_settings.setIcon(_icon_from_svg(resource_path("settings.svg")))
+        self._btn_settings.setFixedSize(btn_size)
+        self._btn_settings.setIconSize(icon_size)
+        self._btn_settings.setStyleSheet("QToolButton { padding: 0px; }")
+        self._btn_settings.clicked.connect(self._open_settings_clicked)
+        top.addWidget(self._btn_settings)
 
         root_layout.addLayout(top)
 
@@ -1898,6 +1946,8 @@ class MainWindow(QMainWindow):
 
         self._tree = GamesTreeWidget(parent=self, on_move_games=self._move_games_to_folder, on_add_files=self._add_files_to_folder)
         self._tree.itemSelectionChanged.connect(self._tree_selection_changed)
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._show_tree_context_menu)
         list_l.addWidget(self._tree, 1)
 
         analyze = QFrame()
@@ -2089,6 +2139,118 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Open sgm.ini", str(e))
 
+    def _show_tree_context_menu(self, pos) -> None:
+        item = self._tree.itemAt(pos)
+        if item is None:
+            return
+        info = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(info, dict):
+            return
+        path_str = None
+        game_id = None
+        if info.get("type") == "folder":
+            path_str = info.get("path")
+        elif info.get("type") == "game":
+            path_str = info.get("folder")
+            game_id = info.get("id")
+
+        if not path_str:
+            return
+
+        menu = QMenu(self)
+        act_reveal = menu.addAction("Reveal In Explorer")
+        action = menu.exec(self._tree.viewport().mapToGlobal(pos))
+        if action is act_reveal:
+            if game_id:
+                self._reveal_game_file(game_id, fallback=Path(path_str))
+            else:
+                self._reveal_in_explorer(Path(path_str))
+
+    def _reveal_game_file(self, game_id: str, *, fallback: Path) -> None:
+        try:
+            game = self._games.get(game_id)
+        except Exception:
+            game = None
+        target = self._first_game_file(game)
+        if target is None:
+            self._reveal_in_explorer(fallback)
+        else:
+            self._reveal_in_explorer(target)
+
+    def _first_game_file(self, game) -> Path | None:
+        if game is None:
+            return None
+        candidates = [
+            game.rom,
+            game.config,
+            game.metadata,
+            game.box,
+            game.box_small,
+            game.overlay,
+            game.overlay2,
+            game.overlay3,
+            game.overlay_big,
+            game.qrcode,
+            game.snap1,
+            game.snap2,
+            game.snap3,
+        ]
+        for p in candidates:
+            if p is not None and p.exists():
+                return p
+        return None
+
+    def _reveal_in_explorer(self, path: Path) -> None:
+        try:
+            target = path
+            if target.is_file():
+                if os.name == "nt":
+                    subprocess.run(["explorer", "/select,", str(target)], check=False)
+                    return
+                target = target.parent
+            if not target.exists():
+                QMessageBox.warning(self, "Reveal In Explorer", f"Path not found:\n{target}")
+                return
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+        except Exception as e:
+            QMessageBox.warning(self, "Reveal In Explorer", str(e))
+
+    def _open_settings_clicked(self) -> None:
+        dlg = SettingsDialog(
+            parent=self,
+            config=self._config,
+            config_path=self._config_path,
+            on_changed=self._settings_changed,
+            on_open_ini=self._open_ini_clicked,
+        )
+        dlg.exec()
+
+    def _settings_changed(self, key: str) -> None:
+        if key == "Language":
+            if hasattr(self, "_meta_editor"):
+                try:
+                    self._meta_editor.set_preferred_language(self._config.language)
+                except Exception:
+                    pass
+            self.refresh(preserve_metadata_edits=True)
+            return
+
+        if key == "MetadataEditors":
+            if hasattr(self, "_meta_editor"):
+                try:
+                    self._meta_editor.set_metadata_editors(self._config.metadata_editors or [])
+                except Exception:
+                    pass
+            return
+
+        if key in {
+            "PaletteExtensions",
+            "DesiredMaxBaseFileLength",
+            "DesiredNumberOfSnaps",
+        }:
+            self.refresh(preserve_metadata_edits=True)
+            return
+
     def _open_cfg_clicked(self) -> None:
         try:
             game = self._current_game()
@@ -2123,7 +2285,7 @@ class MainWindow(QMainWindow):
     def refresh(self, *, preserve_metadata_edits: bool = False) -> None:
         if not self._folder:
             return
-        scan = scan_folder(self._folder)
+        scan = scan_folder(self._folder, palette_exts=set(self._config.palette_extensions or []))
         self._games = scan.games
         self._folder_assets = scan.folders
         self._palette_files = list(scan.palette_files)
@@ -4014,10 +4176,13 @@ class MainWindow(QMainWindow):
             dest = dest_root / src.name
             overwrite = False
             if dest.exists():
-                resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
-                if resp != QMessageBox.StandardButton.Yes:
-                    continue
-                overwrite = True
+                if _is_image_path(dest) and not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                    overwrite = True
+                else:
+                    resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
+                    if resp != QMessageBox.StandardButton.Yes:
+                        continue
+                    overwrite = True
             try:
                 copy_file(src, dest, overwrite=overwrite)
             except Exception as e:
@@ -4065,10 +4230,13 @@ class MainWindow(QMainWindow):
     def _copy_with_prompt(self, src: Path, dest: Path) -> None:
         overwrite = False
         if dest.exists():
-            resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
-            if resp != QMessageBox.StandardButton.Yes:
-                return
-            overwrite = True
+            if _is_image_path(dest) and not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                overwrite = True
+            else:
+                resp = QMessageBox.question(self, "Overwrite?", f"{dest.name} already exists. Overwrite?")
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
+                overwrite = True
         try:
             copy_file(src, dest, overwrite=overwrite)
         except Exception as e:
@@ -4265,12 +4433,13 @@ class MainWindow(QMainWindow):
             self.refresh(preserve_metadata_edits=True)
             return
 
-        blank_default = resource_path("Overlay_blank.png")
+        blank_default = resource_path("Overlay_empty.png")
         override_raw = (self._config.overlay_template_override or "").strip()
-        blank = Path(override_raw).expanduser() if override_raw else blank_default
+        override_list = _parse_overlay_template_override(override_raw)
+        blank = override_list[0] if override_list else blank_default
         if not blank.exists():
             msg = f"Missing overlay template. Expected {blank_default}"
-            if override_raw:
+            if override_list:
                 msg = f"Missing overlay template override: {blank}"
             QMessageBox.warning(self, "AutoBuildOverlay", msg)
             self.refresh(preserve_metadata_edits=True)
@@ -4344,21 +4513,6 @@ class MainWindow(QMainWindow):
         if not game:
             return
 
-        can_use_big = bool(game.overlay_big and game.overlay_big.exists())
-        dlg = OverlayBuildDialog(parent=self, can_use_big_overlay=can_use_big)
-        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.choice:
-            return
-
-        blank_default = resource_path("Overlay_blank.png")
-        override_raw = (self._config.overlay_template_override or "").strip()
-        blank = Path(override_raw).expanduser() if override_raw else blank_default
-        if not blank.exists():
-            msg = f"Missing overlay template. Expected {blank_default}"
-            if override_raw:
-                msg = f"Missing overlay template override: {blank}"
-            QMessageBox.warning(self, "Build Overlay", msg)
-            return
-
         if which not in (1, 2, 3):
             return
 
@@ -4372,66 +4526,23 @@ class MainWindow(QMainWindow):
             dest = overlay2
         else:
             dest = overlay3
+
         if dest.exists():
-            resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
-            if resp != QMessageBox.StandardButton.Yes:
-                return
-
-        build_res = self._config.overlay_build_resolution
-        pos = self._config.overlay_build_position
-
-        try:
-            if dlg.choice == "browse":
-                path, _ = QFileDialog.getOpenFileName(
-                    self,
-                    "Select bottom image",
-                    get_start_dir(game.folder),
-                    "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*.*)",
-                )
-                if not path:
-                    return
-                remember_path(path)
-                build_overlay_png_from_file(
-                    blank,
-                    Path(path),
-                    dest,
-                    overlay_resolution=self._config.overlay_resolution,
-                    build_resolution=build_res,
-                    position=pos,
-                )
-            elif dlg.choice == "paste":
-                qimg = QApplication.clipboard().image()
-                if qimg.isNull():
-                    QMessageBox.information(self, "Build Overlay", "Clipboard does not contain an image")
-                    return
-                bottom = pil_from_qimage(qimg)
-                build_overlay_png(
-                    blank,
-                    bottom,
-                    dest,
-                    overlay_resolution=self._config.overlay_resolution,
-                    build_resolution=build_res,
-                    position=pos,
-                )
-            elif dlg.choice == "big":
-                if not can_use_big or not game.overlay_big:
-                    QMessageBox.information(self, "Build Overlay", "Big Overlay is missing")
-                    return
-                build_overlay_png_from_file(
-                    blank,
-                    game.overlay_big,
-                    dest,
-                    overlay_resolution=self._config.overlay_resolution,
-                    build_resolution=build_res,
-                    position=pos,
-                )
+            if not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                pass
             else:
-                return
-        except ImageProcessError as e:
-            QMessageBox.warning(self, "Build Overlay", str(e))
-            return
-        except Exception as e:
-            QMessageBox.warning(self, "Build Overlay", str(e))
+                resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
+
+        dlg = OverlayBuilderDialog(
+            parent=self,
+            config=self._config,
+            config_path=self._config_path,
+            overlay_dest=dest,
+            big_overlay_path=game.overlay_big if game.overlay_big and game.overlay_big.exists() else None,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         self._images_changed()
@@ -4470,9 +4581,12 @@ class MainWindow(QMainWindow):
             return
         dest = game.folder / f"{game.basename}_qrcode.png"
         if dest.exists():
-            resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
-            if resp != QMessageBox.StandardButton.Yes:
-                return
+            if not bool(getattr(self._config, "confirm_image_overwrite", True)):
+                pass
+            else:
+                resp = QMessageBox.question(self, "Replace?", f"{dest.name} already exists. Replace it?")
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
         try:
             generate_qr_png(url, dest, expected=self._config.qrcode_resolution)
         except Exception as e:

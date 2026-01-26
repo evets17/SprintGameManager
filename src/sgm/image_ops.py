@@ -68,10 +68,6 @@ def build_overlay_png(
             )
 
         x, y = position
-        if x < 0 or y < 0 or (x + bw) > ow or (y + bh) > oh:
-            raise ImageProcessError(
-                f"OverlayBuildPosition {x},{y} places image outside overlay bounds"
-            )
 
         with Image.open(blank_overlay_png) as top:
             top = top.convert("RGBA")
