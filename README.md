@@ -2,6 +2,119 @@
 
 Desktop GUI for managing Intellivision Sprint Console games (ROM, config, metadata, and images) for sideloading.
 
+**Supported Platforms:** Windows, macOS, Linux
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph UI["🖥️ PySide6 GUI"]
+        MenuBar["📑 Menu Bar<br/>(Linux)"]
+        Search["🔍 Search/Filter"]
+        GameList["📋 Game List Panel"]
+        Details["📝 Details Panel"]
+        Metadata["✏️ Metadata Editor"]
+        ImageCards["🖼️ Image Cards"]
+        StatusBar["📊 Status Bar"]
+    end
+
+    subgraph Core["⚙️ Core Logic"]
+        FileOps["📁 File Operations"]
+        Validation["🔍 Resolution Validation"]
+        Config["⚡ Config Manager<br/>(sgm.ini)"]
+        Themes["🎨 Theme Engine<br/>(6 themes)"]
+        Duplicates["🔎 Duplicate Detection"]
+    end
+
+    subgraph Assets["🎮 Game Assets"]
+        ROM["💾 .bin / .int / .rom"]
+        CFG["📄 .cfg"]
+        JSON["📋 .json metadata"]
+        Images["🎨 PNG images<br/>(box, overlay, snap, qr)"]
+    end
+
+    MenuBar --> FileOps
+    Search --> GameList
+    GameList --> FileOps
+    Details --> FileOps
+    Metadata --> JSON
+    ImageCards --> Validation
+    Validation --> Images
+    FileOps --> ROM
+    FileOps --> CFG
+    Config --> UI
+    Themes --> UI
+    Duplicates --> GameList
+
+    style UI fill:#1e3a5f,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style Core fill:#3b1f5f,stroke:#a855f7,stroke-width:2px,color:#fff
+    style Assets fill:#1f4f3a,stroke:#22c55e,stroke-width:2px,color:#fff
+    
+    style MenuBar fill:#2563eb,stroke:#60a5fa,color:#fff
+    style Search fill:#2563eb,stroke:#60a5fa,color:#fff
+    style GameList fill:#2563eb,stroke:#60a5fa,color:#fff
+    style Details fill:#2563eb,stroke:#60a5fa,color:#fff
+    style Metadata fill:#2563eb,stroke:#60a5fa,color:#fff
+    style ImageCards fill:#2563eb,stroke:#60a5fa,color:#fff
+    style StatusBar fill:#2563eb,stroke:#60a5fa,color:#fff
+    
+    style FileOps fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Validation fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Config fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Themes fill:#7c3aed,stroke:#a78bfa,color:#fff
+    style Duplicates fill:#7c3aed,stroke:#a78bfa,color:#fff
+    
+    style ROM fill:#16a34a,stroke:#4ade80,color:#fff
+    style CFG fill:#16a34a,stroke:#4ade80,color:#fff
+    style JSON fill:#16a34a,stroke:#4ade80,color:#fff
+    style Images fill:#16a34a,stroke:#4ade80,color:#fff
+```
+
+## New Features
+
+### Theme Support
+Choose from 6 built-in themes via the dropdown in the top-right corner. Theme selection is saved to your config and persists across sessions.
+
+| Theme | Style | Background | Accent |
+|-------|-------|------------|--------|
+| **System** | Native OS | - | - |
+| **Dark** | Catppuccin Mocha | Deep purple | Blue |
+| **Light** | Catppuccin Latte | Soft gray | Blue |
+| **Nord** | Arctic | Blue-gray | Cyan |
+| **Dracula** | Vampire | Dark purple | Purple |
+| **Gruvbox** | Retro | Brown | Yellow |
+
+### Search & Filter
+Quickly find games using the search box above the games list:
+- Real-time filtering as you type
+- Case-insensitive matching
+- Auto-expands folders containing matches
+- Shows filtered count (e.g., "Games: 42/447")
+
+### Duplicate Detection
+Find games with similar or duplicate names via **Tools → Find Duplicates**:
+- Detects exact matches (ignoring case, symbols, and suffixes like "(Hack)")
+- Detects similar names (>85% match)
+- Double-click a result to jump to that game
+
+### Status Bar
+Shows current operation status at the bottom of the window:
+- Loading progress
+- Game counts
+- Operation feedback
+
+### Context Menu
+Right-click on folders or games in the list:
+- **Open in File Manager** - Jump directly to the folder location
+
+### Linux Enhancements
+- **Menu Bar** - Full menu (File, Tools, View, Help) with keyboard shortcuts
+- **XDG Compliance** - Config stored in `~/.config/sgm/`
+- **HiDPI Support** - Auto-scaling for high-resolution displays
+- **Wayland Support** - Native Wayland hints
+- **GTK File Dialogs** - Native file dialogs on GTK desktops
+- **Desktop Integration** - Install script with system-wide option (`-s` flag)
+
 ## Using the app (end users)
 
 ### 1) Pick your games folder
@@ -86,7 +199,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Build standalone EXE (Windows)
+### Build standalone executable
+
+#### Windows
 
 ```powershell
 . .\.venv\Scripts\Activate.ps1
@@ -96,6 +211,28 @@ pip install -r requirements-build.txt
 ```
 
 Output: `dist\SprintGameManager.exe`
+
+#### Linux
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-build.txt
+./build_exe_linux.sh
+```
+
+Output: `dist/SprintGameManager`
+
+#### macOS
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-build.txt
+./build_exe_mac.sh
+```
+
+Output: `dist/SprintGameManager.app`
 
 ### App config
 

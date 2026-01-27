@@ -34,3 +34,15 @@ def main_window_title() -> str:
     if info.build:
         return f"{APP_NAME} (build:{info.build})"
     return APP_NAME
+
+
+def version_string() -> str:
+    """Return a human-readable version string."""
+    info = get_build_info()
+    if info.build and info.git_sha:
+        return f"Build {info.build} ({info.git_sha})"
+    if info.build:
+        return f"Build {info.build}"
+    if info.git_sha:
+        return f"Dev ({info.git_sha})"
+    return "Development"

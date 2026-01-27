@@ -18,6 +18,8 @@ def _pick_icon_path() -> Path:
     # Prefer the native icon format per-platform, with fallbacks.
     if sys.platform == "darwin":
         names = ["icon.icns", "icon.png", "icon.ico"]
+    elif sys.platform.startswith("linux"):
+        names = ["icon.png", "icon.ico", "icon.icns"]
     else:
         names = ["icon.ico", "icon.png", "icon.icns"]
 
@@ -29,6 +31,13 @@ def _pick_icon_path() -> Path:
 
 
 def _app_config_path() -> Path:
+    # On Linux, prefer XDG_CONFIG_HOME for better standards compliance.
+    if sys.platform.startswith("linux"):
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            return Path(xdg_config) / "sgm" / "sgm.ini"
+        return Path.home() / ".config" / "sgm" / "sgm.ini"
+
     cfg_dir = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation))
     return cfg_dir / "sgm.ini"
 
@@ -56,12 +65,35 @@ def _load_config() -> tuple[AppConfig, Path]:
     return (AppConfig.load_or_create(app_cfg), app_cfg)
 
 
+def _setup_linux_env() -> None:
+    """Configure environment hints for better Linux desktop integration."""
+    # Enable HiDPI auto-scaling if not already set.
+    if not os.environ.get("QT_AUTO_SCREEN_SCALE_FACTOR"):
+        os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+
+    # Prefer native file dialogs on GTK-based desktops.
+    if not os.environ.get("QT_QPA_PLATFORMTHEME"):
+        # Check for common GTK desktop environments.
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        if any(de in desktop for de in ("gnome", "ubuntu", "pantheon", "cinnamon", "mate", "xfce", "lxde")):
+            os.environ["QT_QPA_PLATFORMTHEME"] = "gtk3"
+
+    # Improve Wayland compatibility.
+    if not os.environ.get("QT_QPA_PLATFORM"):
+        session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+        if session_type == "wayland":
+            os.environ["QT_QPA_PLATFORM"] = "wayland"
+
+
 def main() -> int:
     if os.name == "nt" and not os.environ.get("QT_QPA_FONTDIR"):
         windir = Path(os.environ.get("WINDIR", r"C:\Windows"))
         fonts_dir = windir / "Fonts"
         if fonts_dir.exists():
             os.environ["QT_QPA_FONTDIR"] = str(fonts_dir)
+
+    if sys.platform.startswith("linux"):
+        _setup_linux_env()
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -72,7 +104,11 @@ def main() -> int:
 
     config, config_path = _load_config()
 
-    window = MainWindow(config=config, config_path=config_path)
+    # Apply user-selected theme.
+    from sgm.ui.theme import get_stylesheet
+    app.setStyleSheet(get_stylesheet(config.theme))
+
+    window = MainWindow(config=config, config_path=config_path, app=app)
     if icon_path.exists():
         window.setWindowIcon(QIcon(str(icon_path)))
     window.show()

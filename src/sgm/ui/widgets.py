@@ -290,16 +290,15 @@ class ImageCard(QFrame):
             full = "\n".join(warnings)
             self._info.setText(full)
             self._info.setToolTip(full)
-            pal = self._info.palette()
-            pal.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.red)
-            self._info.setPalette(pal)
+            # Use stylesheet for warning color to work with custom themes.
+            self._info.setStyleSheet("QLabel { color: #f38ba8; }")
         else:
             self._info.setToolTip("")
             if existing_path is None:
                 self._info.setText("Optional")
             else:
                 self._info.setText("OK")
-            self._info.setPalette(self._info_default_palette)
+            self._info.setStyleSheet("")
 
     def dest_path(self) -> Path | None:
         if not self._folder or not self._basename:
