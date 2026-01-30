@@ -33,6 +33,8 @@ class AppConfig:
     language: str = "en"
     desired_max_base_file_length: int = 35
     desired_number_of_snaps: int = 2
+    max_desc_length: int = 500
+    auto_save_json: bool = False
 
     box_resolution: Resolution = Resolution(186, 256)
     box_small_resolution: Resolution = Resolution(148, 204)
@@ -112,6 +114,8 @@ class AppConfig:
             "Language": (cfg.language or "en").strip().lower() or "en",
             "DesiredMaxBaseFileLength": str(int(cfg.desired_max_base_file_length)),
             "DesiredNumberOfSnaps": str(int(cfg.desired_number_of_snaps)),
+            "MaxDescLength": str(int(cfg.max_desc_length)),
+            "AutoSaveJson": "True" if cfg.auto_save_json else "False",
             "BoxResolution": cfg.box_resolution.to_string(),
             "BoxSmallResolution": cfg.box_small_resolution.to_string(),
             "OverlayResolution": cfg.overlay_resolution.to_string(),
@@ -219,6 +223,15 @@ class AppConfig:
             data.get("DesiredNumberOfSnaps"), default=cfg.desired_number_of_snaps
         )
         cfg.desired_number_of_snaps = max(0, min(3, cfg.desired_number_of_snaps))
+
+        cfg.max_desc_length = _parse_int(
+            data.get("MaxDescLength"), default=cfg.max_desc_length
+        )
+        cfg.max_desc_length = max(0, cfg.max_desc_length)
+
+        cfg.auto_save_json = _parse_bool(
+            data.get("AutoSaveJson"), default=cfg.auto_save_json
+        )
 
         cfg.box_resolution = Resolution.parse(
             data.get("BoxResolution", cfg.box_resolution.to_string()),

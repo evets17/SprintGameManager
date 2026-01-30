@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 import os
 import subprocess
 
-from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QObject, QSignalBlocker, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPalette, QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -711,6 +711,7 @@ class MetadataEditor(QWidget):
     def __init__(
         self,
         *,
+        config: AppConfig,
         on_saved,
         on_advanced=None,
         on_bulk_update=None,
@@ -718,6 +719,7 @@ class MetadataEditor(QWidget):
         preferred_language: str = "en",
     ):
         super().__init__()
+        self._config = config
         self._on_saved = on_saved
         self._on_advanced = on_advanced
         self._on_bulk_update = on_bulk_update
@@ -732,6 +734,24 @@ class MetadataEditor(QWidget):
         self._dirty = False
         self._raw_json: dict = {}
         self._others_simple_widgets: dict[str, QWidget] = {}
+        self._autosave_in_progress = False
+        self._autosave_pending = False
+        self._autosave_token = 0
+
+        class _FocusOutAutosaveFilter(QObject):
+            def __init__(self, on_focus_out):
+                super().__init__()
+                self._on_focus_out = on_focus_out
+
+            def eventFilter(self, obj, event):
+                try:
+                    if event is not None and event.type() == QEvent.Type.FocusOut:
+                        self._on_focus_out()
+                except Exception:
+                    pass
+                return False
+
+        self._autosave_focus_filter = _FocusOutAutosaveFilter(self._request_autosave)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -745,6 +765,10 @@ class MetadataEditor(QWidget):
         self._warning = QLabel("")
         self._warning.setWordWrap(True)
         self._warning.setStyleSheet("color: red;")
+        self._lbl_autosave = QLabel("Auto-save Enabled")
+        self._lbl_autosave.setVisible(False)
+        self._lbl_autosave.setStyleSheet("font-weight: bold;")
+        top_l.addWidget(self._lbl_autosave)
         top_l.addWidget(self._warning)
 
         btn_row = QHBoxLayout()
@@ -812,6 +836,7 @@ class MetadataEditor(QWidget):
         for lang in self.LANGS:
             edit = QTextEdit()
             edit.setAcceptRichText(False)
+            edit.installEventFilter(self._autosave_focus_filter)
             self._desc_edits[lang] = edit
             self._desc_tabs.addTab(edit, lang)
 
@@ -864,6 +889,21 @@ class MetadataEditor(QWidget):
             w.valueChanged.connect(self._mark_dirty) if hasattr(w, "valueChanged") else w.textChanged.connect(self._mark_dirty)
         self._name.textChanged.connect(self._mark_dirty)
         self._editor.currentTextChanged.connect(self._mark_dirty)
+
+        # Autosave should commit on leaving a control (or editingFinished), not per keystroke.
+        self._name.editingFinished.connect(self._request_autosave)
+        self._nb_players.editingFinished.connect(self._request_autosave)
+        try:
+            self._year.editingFinished.connect(self._request_autosave)
+        except Exception:
+            pass
+        try:
+            le = self._editor.lineEdit()
+            if le is not None:
+                le.editingFinished.connect(self._request_autosave)
+        except Exception:
+            pass
+
         for edit in self._desc_edits.values():
             edit.textChanged.connect(self._mark_dirty)
             edit.textChanged.connect(self._update_desc_count)
@@ -880,6 +920,7 @@ class MetadataEditor(QWidget):
 
         self._update_required_label_styles()
         self._update_desc_count()
+        self._apply_autosave_ui()
 
     def _set_label_missing(self, label: QWidget | None, missing: bool) -> None:
         if label is None:
@@ -932,6 +973,14 @@ class MetadataEditor(QWidget):
         text = edit.toPlainText() if edit else ""
         count = len(text) if text.strip() else 0
         self._lbl_desc_count.setText(f"Character Count: {count}")
+        max_len = int(getattr(self._config, "max_desc_length", 0) or 0)
+        if max_len > 0 and count > max_len:
+            self._lbl_desc_count.setStyleSheet("color: red;")
+        else:
+            self._lbl_desc_count.setStyleSheet("")
+
+    def refresh_desc_count(self) -> None:
+        self._update_desc_count()
 
     def set_preferred_language(self, lang: str, *, set_tab: bool = True) -> None:
         pref = (lang or "en").strip().lower() or "en"
@@ -944,6 +993,24 @@ class MetadataEditor(QWidget):
             except Exception:
                 pass
         self._update_required_label_styles()
+
+    def set_autosave_enabled(self, enabled: bool) -> None:
+        self._config.auto_save_json = bool(enabled)
+        self._apply_autosave_ui()
+
+    def _autosave_enabled(self) -> bool:
+        return bool(getattr(self._config, "auto_save_json", False))
+
+    def _apply_autosave_ui(self) -> None:
+        enabled = self._autosave_enabled()
+        self._lbl_autosave.setVisible(enabled)
+
+        # Hide Save button when autosave is enabled for existing JSON.
+        if enabled and self._path is not None and self._path.exists():
+            self._btn_action.setVisible(False)
+            self._btn_action.setEnabled(False)
+        elif not enabled and self._btn_action.text() == "Save":
+            self._btn_action.setVisible(True)
 
     def set_metadata_editors(self, editors: list[str]) -> None:
         self._metadata_editors = list(editors or [])
@@ -981,6 +1048,7 @@ class MetadataEditor(QWidget):
             self._bottom_spacer.setVisible(True)
             self._update_required_label_styles()
             self._update_desc_count()
+            self._apply_autosave_ui()
             return
 
         if path is None or not path.exists():
@@ -994,6 +1062,7 @@ class MetadataEditor(QWidget):
             self._bottom_spacer.setVisible(True)
             self._update_required_label_styles()
             self._update_desc_count()
+            self._apply_autosave_ui()
             return
 
         self._warning.setText("")
@@ -1008,6 +1077,7 @@ class MetadataEditor(QWidget):
         self._load(path)
         self._update_required_label_styles()
         self._update_desc_count()
+        self._apply_autosave_ui()
 
     def set_bulk_context(self, game_ids: list[str]) -> None:
         # Multi-select: hide per-game controls; bulk updater is launched from the main window.
@@ -1056,6 +1126,7 @@ class MetadataEditor(QWidget):
             self._btn_action.setVisible(True)
             self._btn_action.setEnabled(True)
             self._update_required_label_styles()
+            self._apply_autosave_ui()
             return
 
         self._warning.setText("")
@@ -1063,6 +1134,7 @@ class MetadataEditor(QWidget):
         self._btn_action.setVisible(True)
         self._btn_action.setEnabled(bool(self._dirty))
         self._update_required_label_styles()
+        self._apply_autosave_ui()
 
     def _advanced_clicked(self) -> None:
         if self._path is None or not self._path.exists():
@@ -1123,6 +1195,7 @@ class MetadataEditor(QWidget):
                 w = QCheckBox()
                 w.setChecked(bool(value))
                 w.stateChanged.connect(self._mark_dirty)
+                w.stateChanged.connect(self._request_autosave)
                 self._others_simple_widgets[str(key)] = w
                 self._others_form.addRow(str(key), w)
                 continue
@@ -1133,6 +1206,10 @@ class MetadataEditor(QWidget):
                 w.setSpecialValueText(" ")
                 w.setValue(int(value))
                 w.valueChanged.connect(self._mark_dirty)
+                try:
+                    w.editingFinished.connect(self._request_autosave)
+                except Exception:
+                    pass
                 self._others_simple_widgets[str(key)] = w
                 self._others_form.addRow(str(key), w)
                 continue
@@ -1142,6 +1219,7 @@ class MetadataEditor(QWidget):
                 w.setText(value)
                 w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
                 w.textChanged.connect(self._mark_dirty)
+                w.editingFinished.connect(self._request_autosave)
                 self._others_simple_widgets[str(key)] = w
                 self._others_form.addRow(str(key), w)
                 continue
@@ -1244,6 +1322,49 @@ class MetadataEditor(QWidget):
     def save_changes(self) -> bool:
         return self._save()
 
+    def autosave_now(self, *, refresh: bool = False) -> bool:
+        """Synchronously save pending edits when autosave is enabled.
+
+        Used for navigation/selection changes so we don't prompt the user.
+        """
+
+        if not self._autosave_enabled():
+            return True
+        if self._path is None or not self._path.exists():
+            return True
+        if not self._dirty:
+            return True
+
+        # Cancel any pending deferred autosave.
+        try:
+            self._autosave_token += 1
+        except Exception:
+            pass
+        self._autosave_pending = False
+
+        if self._autosave_in_progress:
+            return True
+
+        data = self._build_json_data()
+        try:
+            self._path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        except Exception as e:
+            QMessageBox.warning(self, "Save failed", str(e))
+            return False
+
+        self._raw_json = dict(data)
+        self._dirty = False
+        self._btn_action.setEnabled(False)
+
+        if refresh:
+            try:
+                if isValid(self):
+                    self._on_saved()
+            except Exception:
+                pass
+
+        return True
+
     def discard_changes(self) -> None:
         if self._path is not None and self._path.exists():
             self._load(self._path)
@@ -1284,12 +1405,77 @@ class MetadataEditor(QWidget):
         if self._btn_action.text() == "Save":
             self._btn_action.setEnabled(True)
 
-    def _save(self) -> bool:
-        if not self._path:
-            return False
+    def _request_autosave(self) -> None:
+        # This is called from focus-out / editingFinished handlers.
+        # Do not save synchronously here; saving triggers MainWindow.refresh(),
+        # which can rebuild widgets and cause Qt to crash due to re-entrancy.
+        if self._autosave_pending:
+            return
+        if not self._autosave_enabled():
+            return
+        if self._path is None or not self._path.exists():
+            return
         if not self._dirty:
-            return True
+            return
 
+        # Snapshot what we'll write *now*, but write it later.
+        target_path = self._path
+        try:
+            target_data = self._build_json_data()
+            target_text = json.dumps(target_data, indent=2, ensure_ascii=False) + "\n"
+        except Exception:
+            return
+
+        self._autosave_pending = True
+        try:
+            self._autosave_token += 1
+            token = int(self._autosave_token)
+        except Exception:
+            token = 0
+
+        def later():
+            self._autosave_pending = False
+            try:
+                if token and int(getattr(self, "_autosave_token", 0)) != token:
+                    return
+            except Exception:
+                pass
+            if self._autosave_in_progress:
+                return
+            self._autosave_in_progress = True
+            try:
+                try:
+                    target_path.write_text(target_text, encoding="utf-8")
+                except Exception as e:
+                    try:
+                        if isValid(self):
+                            QMessageBox.warning(self, "Save failed", str(e))
+                    except Exception:
+                        pass
+                    return
+
+                # If we're still on the same JSON, update state and refresh.
+                same_context = False
+                try:
+                    same_context = bool(self._path == target_path)
+                except Exception:
+                    same_context = False
+
+                if same_context:
+                    self._raw_json = dict(target_data)
+                    self._dirty = False
+                    self._btn_action.setEnabled(False)
+                    try:
+                        if isValid(self):
+                            self._on_saved()
+                    except Exception:
+                        pass
+            finally:
+                self._autosave_in_progress = False
+
+        QTimer.singleShot(0, later)
+
+    def _build_json_data(self) -> dict:
         # Preserve unknown keys by starting from the last loaded JSON.
         data: dict = dict(self._raw_json) if isinstance(self._raw_json, dict) else {}
         data["name"] = self._name.text().strip()
@@ -1316,6 +1502,16 @@ class MetadataEditor(QWidget):
             except Exception:
                 # If a widget can't be read for some reason, leave the original value intact.
                 pass
+
+        return data
+
+    def _save(self) -> bool:
+        if not self._path:
+            return False
+        if not self._dirty:
+            return True
+
+        data = self._build_json_data()
 
         try:
             self._path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -2052,22 +2248,74 @@ class MainWindow(QMainWindow):
         if len(items) != 1:
             prev = self._current
             if prev is not None and self._meta_editor.has_unsaved_changes():
-                dlg = QMessageBox(self)
-                dlg.setIcon(QMessageBox.Icon.Warning)
-                dlg.setWindowTitle("Unsaved Changes")
-                dlg.setText("You have unsaved metadata changes.")
-                dlg.setInformativeText("Save changes before switching selection?")
-                dlg.setStandardButtons(
-                    QMessageBox.StandardButton.Save
-                    | QMessageBox.StandardButton.Discard
-                    | QMessageBox.StandardButton.Cancel
-                )
-                dlg.setDefaultButton(QMessageBox.StandardButton.Save)
-                resp = dlg.exec()
+                if bool(getattr(self._config, "auto_save_json", False)):
+                    if self._meta_editor.autosave_now(refresh=False):
+                        # Auto-saved; proceed without prompting.
+                        pass
+                    else:
+                        # Autosave failed; fall back to prompt.
+                        dlg = QMessageBox(self)
+                        dlg.setIcon(QMessageBox.Icon.Warning)
+                        dlg.setWindowTitle("Unsaved Changes")
+                        dlg.setText("You have unsaved metadata changes.")
+                        dlg.setInformativeText("Save changes before switching selection?")
+                        dlg.setStandardButtons(
+                            QMessageBox.StandardButton.Save
+                            | QMessageBox.StandardButton.Discard
+                            | QMessageBox.StandardButton.Cancel
+                        )
+                        dlg.setDefaultButton(QMessageBox.StandardButton.Save)
+                        resp = dlg.exec()
 
-                if resp == QMessageBox.StandardButton.Save:
-                    if not self._meta_editor.save_changes():
-                        # Save failed; keep current selection and preserve edits.
+                        if resp == QMessageBox.StandardButton.Save:
+                            if not self._meta_editor.save_changes():
+                                # Save failed; keep current selection and preserve edits.
+                                blocker = QSignalBlocker(self._tree)
+                                try:
+                                    self._tree.clearSelection()
+                                    self._set_current_in_tree(prev, silent=False)
+                                finally:
+                                    _ = blocker
+                                return
+                        elif resp == QMessageBox.StandardButton.Discard:
+                            self._meta_editor.discard_changes()
+                        else:
+                            # Cancel: keep current selection and preserve edits.
+                            blocker = QSignalBlocker(self._tree)
+                            try:
+                                self._tree.clearSelection()
+                                self._set_current_in_tree(prev, silent=False)
+                            finally:
+                                _ = blocker
+                            return
+                else:
+                    dlg = QMessageBox(self)
+                    dlg.setIcon(QMessageBox.Icon.Warning)
+                    dlg.setWindowTitle("Unsaved Changes")
+                    dlg.setText("You have unsaved metadata changes.")
+                    dlg.setInformativeText("Save changes before switching selection?")
+                    dlg.setStandardButtons(
+                        QMessageBox.StandardButton.Save
+                        | QMessageBox.StandardButton.Discard
+                        | QMessageBox.StandardButton.Cancel
+                    )
+                    dlg.setDefaultButton(QMessageBox.StandardButton.Save)
+                    resp = dlg.exec()
+
+                    if resp == QMessageBox.StandardButton.Save:
+                        if not self._meta_editor.save_changes():
+                            # Save failed; keep current selection and preserve edits.
+                            blocker = QSignalBlocker(self._tree)
+                            try:
+                                self._tree.clearSelection()
+                                self._set_current_in_tree(prev, silent=False)
+                            finally:
+                                _ = blocker
+                            return
+                    elif resp == QMessageBox.StandardButton.Discard:
+                        self._meta_editor.discard_changes()
+                    else:
+                        # Cancel: keep current selection and preserve edits.
                         blocker = QSignalBlocker(self._tree)
                         try:
                             self._tree.clearSelection()
@@ -2075,17 +2323,6 @@ class MainWindow(QMainWindow):
                         finally:
                             _ = blocker
                         return
-                elif resp == QMessageBox.StandardButton.Discard:
-                    self._meta_editor.discard_changes()
-                else:
-                    # Cancel: keep current selection and preserve edits.
-                    blocker = QSignalBlocker(self._tree)
-                    try:
-                        self._tree.clearSelection()
-                        self._set_current_in_tree(prev, silent=False)
-                    finally:
-                        _ = blocker
-                    return
 
             if not items:
                 self._select_none()
@@ -2251,6 +2488,22 @@ class MainWindow(QMainWindow):
             self.refresh(preserve_metadata_edits=True)
             return
 
+        if key == "MaxDescLength":
+            if hasattr(self, "_meta_editor"):
+                try:
+                    self._meta_editor.refresh_desc_count()
+                except Exception:
+                    pass
+            return
+
+        if key == "AutoSaveJson":
+            if hasattr(self, "_meta_editor"):
+                try:
+                    self._meta_editor.set_autosave_enabled(bool(getattr(self._config, "auto_save_json", False)))
+                except Exception:
+                    pass
+            return
+
     def _open_cfg_clicked(self) -> None:
         try:
             game = self._current_game()
@@ -2331,10 +2584,15 @@ class MainWindow(QMainWindow):
                 self._btn_move.setToolTip("Move this game to a different folder")
 
             self._base_name.setText(f"Basename (game): {game.basename}")
+            base_warnings: list[str] = []
             if len(game.basename) > self._config.desired_max_base_file_length:
-                self._base_warn.setText(
+                base_warnings.append(
                     f"Warning: basename length {len(game.basename)} exceeds DesiredMaxBaseFileLength={self._config.desired_max_base_file_length}"
                 )
+            if "'" in game.basename:
+                base_warnings.append("File names should not contain single quote (')")
+            if base_warnings:
+                self._base_warn.setText("\n".join(base_warnings))
                 self._base_warn.setVisible(True)
             else:
                 self._base_warn.setText("")
@@ -2370,10 +2628,15 @@ class MainWindow(QMainWindow):
                 self._btn_move.setToolTip("Move this folder and its folder-support files")
 
             self._base_name.setText(f"Basename (folder): {assets.basename}")
+            base_warnings: list[str] = []
             if len(assets.basename) > self._config.desired_max_base_file_length:
-                self._base_warn.setText(
+                base_warnings.append(
                     f"Warning: basename length {len(assets.basename)} exceeds DesiredMaxBaseFileLength={self._config.desired_max_base_file_length}"
                 )
+            if "'" in assets.basename:
+                base_warnings.append("File names should not contain single quote (')")
+            if base_warnings:
+                self._base_warn.setText("\n".join(base_warnings))
                 self._base_warn.setVisible(True)
             else:
                 self._base_warn.setText("")
@@ -2987,6 +3250,7 @@ class MainWindow(QMainWindow):
         # Stable filter list so users can toggle specific warnings (e.g., missing overlay).
         ordered: list[tuple[str, str]] = [
             ("longname", "Long name"),
+            ("invalidname", "Invalid File Name"),
             ("missing:rom", "Missing ROM"),
             ("missing:cfg", "Missing Config"),
             ("missing:metadata", "Missing Metadata"),
@@ -3013,6 +3277,7 @@ class MainWindow(QMainWindow):
             ("json:empty:editor", "JSON: Empty Editor"),
             ("json:empty:year", "JSON: Empty/0 Year"),
             ("json:empty:description", f"JSON: Empty Description ({getattr(self._config, 'language', 'en')})"),
+            ("longdesc", "JSON: Long Description"),
             ("json:missing:kbdhackfile", "JSON: Missing kbdhackfile"),
             ("json:missing:gfx-palette", "JSON: Missing gfx-palette"),
         ]
@@ -3260,6 +3525,9 @@ class MainWindow(QMainWindow):
         if len(game.basename) > self._config.desired_max_base_file_length:
             codes.add("longname")
 
+        if "'" in game.basename:
+            codes.add("invalidname")
+
         if include_rom_cfg:
             if game.rom is None:
                 codes.add("missing:rom")
@@ -3412,6 +3680,12 @@ class MainWindow(QMainWindow):
             else:
                 if _is_blank(desc.get(lang)):
                     codes.add("json:empty:description")
+                max_desc = int(getattr(self._config, "max_desc_length", 0) or 0)
+                if max_desc > 0:
+                    raw_desc = "" if desc.get(lang) is None else str(desc.get(lang))
+                    count = len(raw_desc) if raw_desc.strip() else 0
+                    if count > max_desc:
+                        codes.add("longdesc")
 
             extra = data.get("jzintv_extra")
             extra_s = ("" if extra is None else str(extra)).strip()
@@ -3660,6 +3934,7 @@ class MainWindow(QMainWindow):
         right_l.setContentsMargins(0, 0, 0, 0)
         right_l.addWidget(QLabel("Metadata"))
         self._meta_editor = MetadataEditor(
+            config=self._config,
             on_saved=self.refresh,
             on_advanced=self._open_advanced_json,
             on_bulk_update=self._open_bulk_json_update,
@@ -3736,30 +4011,64 @@ class MainWindow(QMainWindow):
         next_key = f"g:{game_id}" if game_id else None
 
         if prev != next_key and prev is not None and self._meta_editor.has_unsaved_changes():
-            dlg = QMessageBox(self)
-            dlg.setIcon(QMessageBox.Icon.Warning)
-            dlg.setWindowTitle("Unsaved Changes")
-            dlg.setText("You have unsaved metadata changes.")
-            dlg.setInformativeText("Save changes before switching games?")
-            dlg.setStandardButtons(
-                QMessageBox.StandardButton.Save
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel
-            )
-            dlg.setDefaultButton(QMessageBox.StandardButton.Save)
-            resp = dlg.exec()
+            if bool(getattr(self._config, "auto_save_json", False)):
+                if not self._meta_editor.autosave_now(refresh=False):
+                    # Autosave failed; fall back to prompt.
+                    dlg = QMessageBox(self)
+                    dlg.setIcon(QMessageBox.Icon.Warning)
+                    dlg.setWindowTitle("Unsaved Changes")
+                    dlg.setText("You have unsaved metadata changes.")
+                    dlg.setInformativeText("Save changes before switching games?")
+                    dlg.setStandardButtons(
+                        QMessageBox.StandardButton.Save
+                        | QMessageBox.StandardButton.Discard
+                        | QMessageBox.StandardButton.Cancel
+                    )
+                    dlg.setDefaultButton(QMessageBox.StandardButton.Save)
+                    resp = dlg.exec()
 
-            if resp == QMessageBox.StandardButton.Save:
-                if not self._meta_editor.save_changes():
-                    # Save failed; keep current selection and preserve edits.
+                    if resp == QMessageBox.StandardButton.Save:
+                        if next_key:
+                            self._current = next_key
+                        if not self._meta_editor.save_changes():
+                            self._current = prev
+                            # Save failed; keep current selection and preserve edits.
+                            self._set_current_in_list(prev)
+                            return
+                    elif resp == QMessageBox.StandardButton.Discard:
+                        self._meta_editor.discard_changes()
+                    else:
+                        # Cancel: keep current selection and preserve edits.
+                        self._set_current_in_list(prev)
+                        return
+            else:
+                dlg = QMessageBox(self)
+                dlg.setIcon(QMessageBox.Icon.Warning)
+                dlg.setWindowTitle("Unsaved Changes")
+                dlg.setText("You have unsaved metadata changes.")
+                dlg.setInformativeText("Save changes before switching games?")
+                dlg.setStandardButtons(
+                    QMessageBox.StandardButton.Save
+                    | QMessageBox.StandardButton.Discard
+                    | QMessageBox.StandardButton.Cancel
+                )
+                dlg.setDefaultButton(QMessageBox.StandardButton.Save)
+                resp = dlg.exec()
+
+                if resp == QMessageBox.StandardButton.Save:
+                    if next_key:
+                        self._current = next_key
+                    if not self._meta_editor.save_changes():
+                        self._current = prev
+                        # Save failed; keep current selection and preserve edits.
+                        self._set_current_in_list(prev)
+                        return
+                elif resp == QMessageBox.StandardButton.Discard:
+                    self._meta_editor.discard_changes()
+                else:
+                    # Cancel: keep current selection and preserve edits.
                     self._set_current_in_list(prev)
                     return
-            elif resp == QMessageBox.StandardButton.Discard:
-                self._meta_editor.discard_changes()
-            else:
-                # Cancel: keep current selection and preserve edits.
-                self._set_current_in_list(prev)
-                return
 
         self._current = next_key
 
@@ -3791,10 +4100,15 @@ class MainWindow(QMainWindow):
             return
 
         self._base_name.setText(f"Basename (game): {game.basename}")
+        base_warnings: list[str] = []
         if len(game.basename) > self._config.desired_max_base_file_length:
-            self._base_warn.setText(
+            base_warnings.append(
                 f"Warning: basename length {len(game.basename)} exceeds DesiredMaxBaseFileLength={self._config.desired_max_base_file_length}"
             )
+        if "'" in game.basename:
+            base_warnings.append("File names should not contain single quote (')")
+        if base_warnings:
+            self._base_warn.setText("\n".join(base_warnings))
             self._base_warn.setVisible(True)
         else:
             self._base_warn.setText("")
@@ -3833,28 +4147,59 @@ class MainWindow(QMainWindow):
         next_key = f"f:{str(folder_dir)}"
 
         if prev != next_key and prev is not None and self._meta_editor.has_unsaved_changes():
-            dlg = QMessageBox(self)
-            dlg.setIcon(QMessageBox.Icon.Warning)
-            dlg.setWindowTitle("Unsaved Changes")
-            dlg.setText("You have unsaved metadata changes.")
-            dlg.setInformativeText("Save changes before switching selection?")
-            dlg.setStandardButtons(
-                QMessageBox.StandardButton.Save
-                | QMessageBox.StandardButton.Discard
-                | QMessageBox.StandardButton.Cancel
-            )
-            dlg.setDefaultButton(QMessageBox.StandardButton.Save)
-            resp = dlg.exec()
+            if bool(getattr(self._config, "auto_save_json", False)):
+                if not self._meta_editor.autosave_now(refresh=False):
+                    dlg = QMessageBox(self)
+                    dlg.setIcon(QMessageBox.Icon.Warning)
+                    dlg.setWindowTitle("Unsaved Changes")
+                    dlg.setText("You have unsaved metadata changes.")
+                    dlg.setInformativeText("Save changes before switching selection?")
+                    dlg.setStandardButtons(
+                        QMessageBox.StandardButton.Save
+                        | QMessageBox.StandardButton.Discard
+                        | QMessageBox.StandardButton.Cancel
+                    )
+                    dlg.setDefaultButton(QMessageBox.StandardButton.Save)
+                    resp = dlg.exec()
 
-            if resp == QMessageBox.StandardButton.Save:
-                if not self._meta_editor.save_changes():
+                    if resp == QMessageBox.StandardButton.Save:
+                        if next_key:
+                            self._current = next_key
+                        if not self._meta_editor.save_changes():
+                            self._current = prev
+                            self._set_current_in_list(prev)
+                            return
+                    elif resp == QMessageBox.StandardButton.Discard:
+                        self._meta_editor.discard_changes()
+                    else:
+                        self._set_current_in_list(prev)
+                        return
+            else:
+                dlg = QMessageBox(self)
+                dlg.setIcon(QMessageBox.Icon.Warning)
+                dlg.setWindowTitle("Unsaved Changes")
+                dlg.setText("You have unsaved metadata changes.")
+                dlg.setInformativeText("Save changes before switching selection?")
+                dlg.setStandardButtons(
+                    QMessageBox.StandardButton.Save
+                    | QMessageBox.StandardButton.Discard
+                    | QMessageBox.StandardButton.Cancel
+                )
+                dlg.setDefaultButton(QMessageBox.StandardButton.Save)
+                resp = dlg.exec()
+
+                if resp == QMessageBox.StandardButton.Save:
+                    if next_key:
+                        self._current = next_key
+                    if not self._meta_editor.save_changes():
+                        self._current = prev
+                        self._set_current_in_list(prev)
+                        return
+                elif resp == QMessageBox.StandardButton.Discard:
+                    self._meta_editor.discard_changes()
+                else:
                     self._set_current_in_list(prev)
                     return
-            elif resp == QMessageBox.StandardButton.Discard:
-                self._meta_editor.discard_changes()
-            else:
-                self._set_current_in_list(prev)
-                return
 
         self._current = next_key
 
@@ -3873,10 +4218,15 @@ class MainWindow(QMainWindow):
             self._btn_move.setToolTip("Move this folder and its folder-support files")
 
         self._base_name.setText(f"Basename (folder): {assets.basename}")
+        base_warnings: list[str] = []
         if len(assets.basename) > self._config.desired_max_base_file_length:
-            self._base_warn.setText(
+            base_warnings.append(
                 f"Warning: basename length {len(assets.basename)} exceeds DesiredMaxBaseFileLength={self._config.desired_max_base_file_length}"
             )
+        if "'" in assets.basename:
+            base_warnings.append("File names should not contain single quote (')")
+        if base_warnings:
+            self._base_warn.setText("\n".join(base_warnings))
             self._base_warn.setVisible(True)
         else:
             self._base_warn.setText("")

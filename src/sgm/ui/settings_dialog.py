@@ -257,6 +257,15 @@ class SettingsDialog(QDialog):
             "Prefix used for media paths in jzintv flags (e.g., /media/usb0).",
         )
 
+        self._chk_auto_save_json = QCheckBox()
+        self._chk_auto_save_json.stateChanged.connect(self._on_auto_save_json_changed)
+        self._row(
+            form,
+            "Auto-save JSON",
+            self._chk_auto_save_json,
+            "When enabled, metadata changes are saved to JSON automatically.",
+        )
+
         self._list_json_keys = QListWidget()
         self._list_json_keys.setMinimumHeight(140)
         _enable_reorder(self._list_json_keys, lambda: self._sync_list_setting(self._list_json_keys))
@@ -302,6 +311,16 @@ class SettingsDialog(QDialog):
             "Max File Length",
             self._spin_max_len,
             "Maximum recommended base filename length for warning checks.",
+        )
+
+        self._spin_max_desc_len = QSpinBox()
+        self._spin_max_desc_len.setRange(0, 9999)
+        self._spin_max_desc_len.valueChanged.connect(self._on_max_desc_len_changed)
+        self._row(
+            form,
+            "Max Description Length",
+            self._spin_max_desc_len,
+            "Maximum description character count before a warning is shown (0 disables warning).",
         )
 
         self._spin_snaps = QSpinBox()
@@ -417,7 +436,9 @@ class SettingsDialog(QDialog):
     def _load_from_config(self) -> None:
         self._combo_lang.blockSignals(True)
         self._edit_media_prefix.blockSignals(True)
+        self._chk_auto_save_json.blockSignals(True)
         self._spin_max_len.blockSignals(True)
+        self._spin_max_desc_len.blockSignals(True)
         self._spin_snaps.blockSignals(True)
         self._edit_build_res.blockSignals(True)
         self._spin_build_x.blockSignals(True)
@@ -443,11 +464,14 @@ class SettingsDialog(QDialog):
 
         self._edit_media_prefix.setText(self._config.jzintv_media_prefix or "")
 
+        self._chk_auto_save_json.setChecked(bool(getattr(self._config, "auto_save_json", False)))
+
         self._list_json_keys.clear()
         for k in self._config.json_keys or []:
             self._list_json_keys.addItem(k)
 
         self._spin_max_len.setValue(int(self._config.desired_max_base_file_length))
+        self._spin_max_desc_len.setValue(int(getattr(self._config, "max_desc_length", 0)))
         self._spin_snaps.setValue(int(self._config.desired_number_of_snaps))
 
         self._edit_build_res.setText(self._config.overlay_build_resolution.to_string())
@@ -464,7 +488,9 @@ class SettingsDialog(QDialog):
 
         self._combo_lang.blockSignals(False)
         self._edit_media_prefix.blockSignals(False)
+        self._chk_auto_save_json.blockSignals(False)
         self._spin_max_len.blockSignals(False)
+        self._spin_max_desc_len.blockSignals(False)
         self._spin_snaps.blockSignals(False)
         self._edit_build_res.blockSignals(False)
         self._spin_build_x.blockSignals(False)
@@ -491,12 +517,26 @@ class SettingsDialog(QDialog):
         self._config.jzintv_media_prefix = val
         self._save_config("JzIntvMediaPrefix")
 
+    def _on_auto_save_json_changed(self, _value: int) -> None:
+        val = bool(self._chk_auto_save_json.isChecked())
+        if getattr(self._config, "auto_save_json", False) == val:
+            return
+        self._config.auto_save_json = val
+        self._save_config("AutoSaveJson")
+
     def _on_max_len_changed(self, value: int) -> None:
         v = int(value)
         if self._config.desired_max_base_file_length == v:
             return
         self._config.desired_max_base_file_length = v
         self._save_config("DesiredMaxBaseFileLength")
+
+    def _on_max_desc_len_changed(self, value: int) -> None:
+        v = max(0, int(value))
+        if getattr(self._config, "max_desc_length", 0) == v:
+            return
+        self._config.max_desc_length = v
+        self._save_config("MaxDescLength")
 
     def _on_snaps_changed(self, value: int) -> None:
         v = int(value)
