@@ -109,6 +109,9 @@ class SettingsDialog(QDialog):
         self._on_changed = on_changed
         self._on_open_ini = on_open_ini
 
+        # Remember last directory used for adding overlay templates during this dialog session.
+        self._last_template_dir: Path | None = Path(self._config.last_game_folder) if self._config.last_game_folder else None
+
         self._build_ui()
         self._load_from_config()
 
@@ -662,7 +665,8 @@ class SettingsDialog(QDialog):
             self._save_config("JsonKeys")
 
     def _add_template(self) -> None:
-        start = Path(self._config.last_game_folder) if self._config.last_game_folder else None
+        # Start browsing in the last-template dir if available, otherwise fall back to last_game_folder.
+        start = self._last_template_dir or (Path(self._config.last_game_folder) if self._config.last_game_folder else None)
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select overlay template",
@@ -671,6 +675,13 @@ class SettingsDialog(QDialog):
         )
         if not path:
             return
+        # Remember the directory for subsequent template additions.
+        try:
+            p = Path(path)
+            if p.parent.exists():
+                self._last_template_dir = p.parent
+        except Exception:
+            pass
         items = _list_from_widget(self._list_templates)
         if path in items:
             return
